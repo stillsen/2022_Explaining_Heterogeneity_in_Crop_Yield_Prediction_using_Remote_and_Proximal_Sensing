@@ -145,8 +145,8 @@ for dir in os.listdir(root):
 # move merged reference file to alignment path
 reference_path = os.path.join(root, reference_dir, sub_dir)
 shutil.copyfile(os.path.join(reference_path, reference_merge_file), os.path.join(reference_path, reference_merge_file.split('.')[0]+'_aligned.tif'))
-shutil.copyfile(os.path.join(reference_path, reference_merge_file), os.path.join(reference_path, reference_merge_file.split('.')[0]+'_aligned.tif'))
-shutil.copyfile(os.path.join(reference_path, reference_merge_file), os.path.join(reference_path, reference_merge_file.split('.')[0]+'_aligned.tif'))
+shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm_aligned.tif'))
+shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi_aligned.tif')
 # files = os.listdir(reference_path)
 # aligment_files = [file for file in files if 'aligned' in file]
 # for aligment_file in aligment_files:
