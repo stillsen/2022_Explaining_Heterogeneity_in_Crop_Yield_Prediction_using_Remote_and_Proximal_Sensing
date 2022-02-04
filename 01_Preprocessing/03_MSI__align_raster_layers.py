@@ -92,40 +92,40 @@ for dir in os.listdir(root):
         target_merge_file = target_file.rsplit('_', 1)[0]+'_merged.tif'
 
         target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
-        if not os.path.isfile(target_merge_file_abs):
-            print('merging channels of {}'.format(target_merge_file_abs))
-            # Step 1.) Create a virtual raster (VRT) with option "separate=True" to stack the images as separate bands
-            VRT = 'OutputImage.vrt'
+        if 'RGB' not in dir: # MSI a) merge all band into one raster file & b) align
+            if not os.path.isfile(target_merge_file_abs):
+                print('merging channels of {}'.format(target_merge_file_abs))
+                # Step 1.) Create a virtual raster (VRT) with option "separate=True" to stack the images as separate bands
+                VRT = 'OutputImage.vrt'
 
-            if 'RGB' not in dir:
                 # for MSI: create a dict and apply a particular order to bands
                 file_bands=[file.split('_')[-1].split('.')[0] for file in files]
                 index = dict(zip(file_bands,files))
                 files = [index[band] for band in bands]
 
-            files_abs = [os.path.join(root, dir, sub_dir, x) for x in files]
-            vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic', separate=True,
-                                               callback=gdal.TermProgress_nocb)
-            gdal.BuildVRT(VRT, files_abs, options=vrt_options)
+                files_abs = [os.path.join(root, dir, sub_dir, x) for x in files]
+                vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic', separate=True,
+                                                   callback=gdal.TermProgress_nocb)
+                gdal.BuildVRT(VRT, files_abs, options=vrt_options)
 
-            # Step 2.) Translate virtual raster (VRT) into GeoTiff:
-            input_image = gdal.Open(VRT, 0)  # open the VRT in read-only mode
-            gdal.Translate(target_merge_file_abs, input_image, format='GTiff',
-                           creationOptions=['COMPRESS:DEFLATE', 'TILED:YES'],
-                           callback=gdal.TermProgress_nocb)
-            del input_image  # close the VRT
-            del VRT
-        else:
-            print('merged file found: {}'.format(target_merge_file_abs))
+                # Step 2.) Translate virtual raster (VRT) into GeoTiff:
+                input_image = gdal.Open(VRT, 0)  # open the VRT in read-only mode
+                gdal.Translate(target_merge_file_abs, input_image, format='GTiff',
+                               creationOptions=['COMPRESS:DEFLATE', 'TILED:YES'],
+                               callback=gdal.TermProgress_nocb)
+                del input_image  # close the VRT
+                del VRT
+            else:
+                print('merged file found: {}'.format(target_merge_file_abs))
 
-        # calculating alignment and perform shift for bands
-        print('Aligning {target_file} to {reference_file}'.format(target_file=target_merge_file, reference_file=reference_merge_file))
-        out_file = os.path.join(alignment_path,target_merge_file.split('.')[0]+'_aligned.tif')
-        CR = COREG(reference_merge_file_abs, target_merge_file_abs, path_out=out_file, max_shift=11, ws=(256,256))
-        CR.calculate_spatial_shifts()
-        CR.correct_shifts()
-        
-        if 'RGB' not in dir:
+            # calculating alignment and perform shift for bands
+            print('Aligning {target_file} to {reference_file}'.format(target_file=target_merge_file, reference_file=reference_merge_file))
+            out_file = os.path.join(alignment_path,target_merge_file.split('.')[0]+'_aligned.tif')
+            CR = COREG(reference_merge_file_abs, target_merge_file_abs, path_out=out_file, max_shift=11, ws=(256,256))
+            CR.calculate_spatial_shifts()
+            CR.correct_shifts()
+
+
             # apply same alignment to ndvi and dsm
             target_merge_file = target_file.rsplit('_', 3)[0] + '_index_ndvi.tif'
             out_file = os.path.join(alignment_path,target_file.rsplit('_', 3)[0] + '_index_ndvi_aligned.tif')
@@ -139,7 +139,15 @@ for dir in os.listdir(root):
             print('Aligning {target_file}'.format(target_file=target_merge_file))
             target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
             DESHIFTER(target_merge_file_abs, CR.coreg_info, path_out=out_file,band2process=1).correct_shifts()
-
+        else: # RGB, does not need to be merged, but aligned directly
+            files_abs = [os.path.join(root, dir, sub_dir, x) for x in files]
+            # calculating alignment and perform shift for bands
+            print('Aligning {target_file} to {reference_file}'.format(target_file=target_merge_file,
+                                                                      reference_file=reference_merge_file))
+            out_file = os.path.join(alignment_path, target_merge_file.split('.')[0] + '_aligned.tif')
+            CR = COREG(reference_merge_file_abs, files_abs[0], path_out=out_file, max_shift=11, ws=(256, 256))
+            CR.calculate_spatial_shifts()
+            CR.correct_shifts()
         print(100 * '-')
 
 # move merged reference file to alignment path
