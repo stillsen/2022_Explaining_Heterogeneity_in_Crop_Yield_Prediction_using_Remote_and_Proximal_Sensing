@@ -3,13 +3,15 @@ import os.path
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import movingpandas as mpd
+# import movingpandas as mpd
 from geopandas import GeoDataFrame, read_file
 import seaborn as sns
 
 import matplotlib.pyplot as plt
 
-path = "/media/stillsen/Elements_SE/PatchCROP/AIA/GeoPackage/Cleaned_Yield-Maps_AIA_Working_copy/flow_corrected_manually_corrected**"
+# path = "/media/stillsen/Elements_SE/PatchCROP/AIA/GeoPackage/Cleaned_Yield-Maps_AIA_Working_copy/flow_corrected_manually_corrected**"
+path = '../../1_Data_working_copy/Cleaned_Yield-Maps_AIA_Working_copy/flow_corrected_manually_corrected'
+
 smc = {'Maiz': 0.155, 'Pha': 0.12, 'Sun': 0.1, 'Lup': 0.15, 'SOats': 0.14, 'Soy': 0.13}
 
 for file in os.listdir(path):
