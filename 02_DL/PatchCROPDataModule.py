@@ -39,14 +39,18 @@ from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset, TensorDataset, ConcatDataset
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 from pytorch_lightning import LightningDataModule
 from pytorch_lightning.core.lightning import LightningModule
 from pytorch_lightning.loops.base import Loop
 from pytorch_lightning.loops.fit_loop import FitLoop
 from pytorch_lightning.trainer.states import TrainerFn
+from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
+from pytorch_lightning.callbacks import Callback, EarlyStopping
 
 from torchmetrics import R2Score
+# from ignite.contrib.metrics.regression import R2Score
 # from ignite.engine import *
 
 # Own modules
@@ -80,9 +84,8 @@ class PatchCROPDataModule(LightningDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, input_files: dict, data_dir: str = './', batch_size: int = 16, stride:int = 20, workers:int = 0):
+    def __init__(self, input_files: dict, data_dir: str = './', batch_size: int = 16, stride:int = 20, workers:int = 0, augmented:bool = False):
         super().__init__()
-        self.data_dir = data_dir
         self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
 
@@ -93,12 +96,14 @@ class PatchCROPDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.stride = stride
         self.workers = workers
+        self.augmented = augmented
 
         # Datesets
         self.splits = [[] for i in range(self.num_folds)]
         # 0-7 rotate for train and val; 8 is test set
         self.split_idx = [split for split in KFold(self.num_folds-1).split(range(self.num_folds-1))]
         self.setup_done = False
+
 
         # self.prepare_data_per_node=False
         # # multi spectral setting
@@ -128,14 +133,18 @@ class PatchCROPDataModule(LightningDataModule):
         # split
         # oversample
         # load over feature label combinations
-        kfold_dir = os.path.join(self.data_dir,'kfold_set')
+        if self.augmented:
+            kfold_dir = os.path.join(self.data_dir,'kfold_set_augmented')
+        else:
+            kfold_dir = os.path.join(self.data_dir, 'kfold_set')
         if not self.setup_done:
             # check if already build and load
             if os.path.isdir(kfold_dir):
                 # load
                 for file in os.listdir(kfold_dir):
                     k = file.split('.')[0][-1]
-                    f = torch.load(os.path.join(kfold_dir,file))
+                    # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
+                    f = torch.load(os.path.join(kfold_dir, file))
                     self.splits[int(k)] = f
             else:
                 # otherwise build oversampled k-fold set
@@ -158,10 +167,10 @@ class PatchCROPDataModule(LightningDataModule):
                             feature_matrix = torch.cat((feature_matrix, f.unsqueeze(0)), 0)
                         else:
                             feature_matrix = torch.cat((feature_matrix, f), 0)
-                    # channel-wise z-score normalization
-                    channel_wise_mean = [feature_matrix[i,:,:].mean() for i in range(feature_matrix.size()[0])]
-                    channel_wise_std = [feature_matrix[i, :, :].std() for i in range(feature_matrix.size()[0])]
-                    feature_matrix = TF.normalize(feature_matrix, channel_wise_mean, channel_wise_std)
+                    # # channel-wise z-score normalization --> nope!!! don't use for ttransfer learning. here we need normalization to [0. 1]
+                    # channel_wise_mean = [feature_matrix[i,:,:].mean() for i in range(feature_matrix.size()[0])]
+                    # channel_wise_std = [feature_matrix[i, :, :].std() for i in range(feature_matrix.size()[0])]
+                    # feature_matrix = TF.normalize(feature_matrix, channel_wise_mean, channel_wise_std)
 
                     # spatial splits for k fold spatial cross validation and call sliding window  -> 224x224 images
                     self.setup_folds(label_matrix, feature_matrix)
@@ -173,7 +182,7 @@ class PatchCROPDataModule(LightningDataModule):
                     torch.save(self.splits[idx], file_name)
             self.setup_done = True
 
-    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224, transform_train: bool=True) -> None:
+    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224, feature_RGB=True, transform_train: bool=True) -> None:
         '''
         :param label_matrix: kriging interpolated yield maps
         :param feature_matrix: stack of feature maps, such as rgb remote sensing, multi-channel remote sensing or dsm or ndvi
@@ -181,7 +190,8 @@ class PatchCROPDataModule(LightningDataModule):
         or not
         :return:
         '''
-        train_transformer = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
+        if self.augmented:
+            train_transformer = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
 
         fold_starts_x = [0, 774, 1548]
         fold_length_x = 774
@@ -196,7 +206,27 @@ class PatchCROPDataModule(LightningDataModule):
         upper_bound_y = feature_matrix.shape[1] - lower_bound
 
         # clip to tightest inner rectangle
-        feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+        # and normalize feature array to range [0,1]
+        # this could be outsourced to transforms.toTensor(), however this would require the input to be a PIL image
+        if feature_RGB:
+            feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+            feature_arr[:3, :, :] /= 255 # normalzie RGB channels
+            if feature_arr.shape[0] > 3: # normalize rest of channels
+                # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+                feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
+                feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
+                feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
+                feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
+                # feature_arr_min = feature_arr.view(feature_arr.size(0), -1).min(1, keepdim=True)[0]  # get channel-wise min
+                # feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0]  # get channel-wise max
+                # feature_arr[3:, :, :] -= feature_arr_min.unsqueeze(1)  # channel-wise substraction
+                # feature_arr[3:, :, :] /= feature_arr_max.unsqueeze(1)
+        else:
+            feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+            feature_arr_min = feature_arr.view(feature_arr.size(0),-1).min(1,keepdim=True)[0] # get channel-wise min
+            feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
+            feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
+            feature_arr /= feature_arr_max.unsqueeze(1)
         label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x]
 
         counter = 0
@@ -233,12 +263,15 @@ class PatchCROPDataModule(LightningDataModule):
                         # shift kernel over image and extract kernel part
                         # only take RGB value
                         feature_kernel_img = feature_fold_arr[:, y:y + kernel_size, x:x + kernel_size]
-                        # transform kernel image
-                        if transform_train and counter < 8: # train: flip and normalize
-                            feature_kernel_img = train_transformer(feature_kernel_img)
-                        # else: # test: only normalize
-                        #     feature_kernel_img = test_transformer(feature_kernel_img)
                         label_kernel_img = label_fold_arr[y:y + kernel_size, x:x + kernel_size]
+                        # transform kernel image
+                        if self.augmented:
+                            if transform_train and counter < 8: # train: flip
+                                state = torch.get_rng_state()
+                                feature_kernel_img = train_transformer(feature_kernel_img)
+                                torch.set_rng_state(state)
+                                label_kernel_img = train_transformer(label_kernel_img)
+
                         if x==0 and y==0:
                             feature_tensor = feature_kernel_img.unsqueeze(0)
                             label_tensor = label_kernel_img.mean().unsqueeze(0)
@@ -256,7 +289,7 @@ class PatchCROPDataModule(LightningDataModule):
         self.test_dataset = self.splits[-1]
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers, shuffle=True)
+        return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
 
     def val_dataloader(self) -> DataLoader:
         # transformer = transforms.Compose([transforms.ToTensor()])
@@ -264,6 +297,11 @@ class PatchCROPDataModule(LightningDataModule):
         return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
 
     def test_dataloader(self) -> DataLoader:
+        # transformer = transforms.Compose([transforms.ToTensor()])
+        # return transformer(DataLoader(self.test_dataset))
+        return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
+
+    def predict_dataloader(self) -> DataLoader:
         # transformer = transforms.Compose([transforms.ToTensor()])
         # return transformer(DataLoader(self.test_dataset))
         return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
@@ -281,30 +319,39 @@ class PatchCROPDataModule(LightningDataModule):
 #############################################################################################
 
 
-class SpatialCVModel(LightningModule):
-    def __init__(self, model_cls: Type[LightningModule], checkpoint_paths: List[str]) -> None:
-        super().__init__()
-        # Create `num_folds` models with their associated fold weights
-        self.models = torch.nn.ModuleList([model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
-        # self.predictions = torch.tensor([])
-        # self.y = torch.tensor([])
-        self.global_r2 = R2Score()
-        self.local_r2 = [R2Score() for i in range(8)]
-
-    def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
-        # Compute predictions over the `num_folds` models.
-        # report global and local r2 score
-        y = batch[1]
-        y_hat = torch.stack([m(batch[0]) for m in self.models])
-
-        # print("{}, {}".format(y_hat[1,:].squeeze().shape, y_hat.shape))
-        for i in range(8):
-            self.local_r2[i].update(y_hat[i,:].squeeze(), y)
-            self.log("local R2 - M{}".format(i), self.local_r2[i].compute(), prog_bar=True, logger=True)
-        # print(y_hat.squeeze(1).shape)
-        self.global_r2.update(y_hat.flatten(), y.repeat(8))
-        self.log("global R2", self.global_r2.compute(), prog_bar=True, logger=True)
-
+# class SpatialCVModel(LightningModule):
+#     def __init__(self, model_cls: Type[LightningModule], checkpoint_paths: List[str]) -> None:
+#         super().__init__()
+#         # Create `num_folds` models with their associated fold weights
+#         self.models = torch.nn.ModuleList([model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
+#         # self.predictions = torch.tensor([])
+#         # self.y = torch.tensor([])
+#         self.global_r2 = R2Score()
+#         self.local_r2 = [R2Score() for i in range(8)]
+#
+#     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
+#         # Compute predictions over the `num_folds` models.
+#         # report global and local r2 score
+#         y = batch[1]
+#         y_hat = torch.stack([m(batch[0]) for m in self.models])
+#
+#         # self.log("y is cuda", y.is_cuda, logger=True)
+#         # self.log("y_hat is cuda", y_hat[0,:].squeeze().is_cuda, logger=True)
+#
+#         # y = y.to(device=self.device)
+#         # y_hat = y_hat.to(device=self.device)
+#
+#         # print("{}, {}".format(y_hat[1,:].squeeze().shape, y_hat.shape))
+#         for i in range(8):
+#             this_y_hat = y_hat[i,:].squeeze()
+#             # print(y.is_cuda)
+#             # print(this_y_hat.is_cuda)
+#             self.local_r2[i].update(this_y_hat, y)
+#             self.log("local R2 - M{}".format(i), self.local_r2[i].compute(), prog_bar=True, logger=True)
+#
+#         self.global_r2.update(y_hat.flatten(), y.repeat(8))
+#         self.log("global R2", self.global_r2.compute(), prog_bar=True, logger=True)
+#
 
 #############################################################################################
 #                           Step 4 / 5: Implement the  KFoldLoop                            #
@@ -331,83 +378,103 @@ class SpatialCVModel(LightningModule):
 #                                                                                           #
 #        return self.on_run_end(...)                                                        #
 #############################################################################################
-
-
-class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str) -> None:
-        super().__init__()
-        self.num_folds = num_folds
-        self.current_fold: int = 0
-        self.export_path = export_path
-
-    @property
-    def done(self) -> bool:
-        return self.current_fold >= self.num_folds
-
-    def connect(self, fit_loop: FitLoop) -> None:
-        self.fit_loop = fit_loop
-
-    def reset(self) -> None:
-        """Nothing to reset in this loop."""
-
-    def on_run_start(self, *args: Any, **kwargs: Any) -> None:
-        """Used to call `setup_folds` from the `BaseKFoldDataModule` instance and store the original weights of the
-        model."""
-
-        self.lightning_module_state_dict = deepcopy(self.trainer.lightning_module.state_dict())
-
-    def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
-        """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
-        print(f"STARTING FOLD {self.current_fold}")
-        # assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
-        self.trainer.datamodule.setup_fold_index(self.current_fold)
-
-    def advance(self, *args: Any, **kwargs: Any) -> None:
-        """Used to the run a fitting and testing on the current hold."""
-        self._reset_fitting()  # requires to reset the tracking stage.
-        self.fit_loop.run()
-
-        self._reset_testing()  # requires to reset the tracking stage.
-        self.trainer.test_loop.run()
-        self.current_fold += 1  # increment fold tracking number.
-
-    def on_advance_end(self) -> None:
-        """Used to save the weights of the current fold and reset the LightningModule and its optimizers."""
-        self.trainer.save_checkpoint(osp.join(self.export_path, f"model.{self.current_fold}.pt"))
-        # restore the original weights + optimizers and schedulers.
-        self.trainer.lightning_module.load_state_dict(self.lightning_module_state_dict)
-        self.trainer.strategy.setup_optimizers(self.trainer)
-        self.replace(fit_loop=FitLoop)
-
-    def on_run_end(self) -> None:
-        """Used to compute the performance of the ensemble model on the test set."""
-        checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-        scv_model = SpatialCVModel(type(self.trainer.lightning_module), checkpoint_paths)
-        scv_model.trainer = self.trainer
-        # This requires to connect the new model and move it the right device.
-        self.trainer.strategy.connect(scv_model)
-        self.trainer.strategy.model_to_device()
-        self.trainer.test_loop.run()
-
-    def on_save_checkpoint(self) -> Dict[str, int]:
-        return {"current_fold": self.current_fold}
-
-    def on_load_checkpoint(self, state_dict: Dict) -> None:
-        self.current_fold = state_dict["current_fold"]
-
-    def _reset_fitting(self) -> None:
-        self.trainer.reset_train_dataloader()
-        self.trainer.reset_val_dataloader()
-        self.trainer.state.fn = TrainerFn.FITTING
-        self.trainer.training = True
-
-    def _reset_testing(self) -> None:
-        self.trainer.reset_test_dataloader()
-        self.trainer.state.fn = TrainerFn.TESTING
-        self.trainer.testing = True
-
-    def __getattr__(self, key) -> Any:
-        # requires to be overridden as attributes of the wrapped loop are being accessed.
-        if key not in self.__dict__:
-            return getattr(self.fit_loop, key)
-        return self.__dict__[key]
+#
+# class PrintCallback(Callback):
+#     def on_train_start(self, trainer, pl_module):
+#         print("Training is started!")
+#     def on_train_end(self, trainer, pl_module):
+#         print("Training is done.")
+#
+#
+# class KFoldLoop(Loop):
+#     def __init__(self, num_folds: int, export_path: str) -> None:
+#         super().__init__()
+#         self.num_folds = num_folds
+#         self.current_fold: int = 0
+#         self.export_path = export_path
+#
+#     @property
+#     def done(self) -> bool:
+#         return self.current_fold >= self.num_folds
+#
+#     def connect(self, fit_loop: FitLoop) -> None:
+#         self.fit_loop = fit_loop
+#
+#     def reset(self) -> None:
+#         """Nothing to reset in this loop."""
+#
+#     def on_run_start(self, *args: Any, **kwargs: Any) -> None:
+#         """Used to call `setup_folds` from the `BaseKFoldDataModule` instance and store the original weights of the
+#         model."""
+#
+#         self.lightning_module_state_dict = deepcopy(self.trainer.lightning_module.state_dict())
+#
+#     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
+#         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
+#         print(f"STARTING FOLD {self.current_fold}")
+#         # assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
+#
+#         self.trainer.datamodule.setup_fold_index(self.current_fold)
+#
+#     def advance(self, *args: Any, **kwargs: Any) -> None:
+#         """Used to the run a fitting and testing on the current hold."""
+#         self._reset_fitting()  # requires to reset the tracking stage.
+#         self.fit_loop.run()
+#
+#         self._reset_testing()  # requires to reset the tracking stage.
+#         # self.trainer.test_loop.run()
+#         self.current_fold += 1  # increment fold tracking number.
+#
+#     def on_advance_end(self) -> None:
+#         """Used to save the weights of the current fold and reset the LightningModule and its optimizers."""
+#         self.trainer.save_checkpoint(osp.join(self.export_path, f"model.{self.current_fold}.pt"))
+#         # restore the original weights + optimizers and schedulers.
+#         self.trainer.lightning_module.load_state_dict(self.lightning_module_state_dict)
+#         #  use distinct early stopping for current fold
+#         # self.trainer.callbacks = [PrintCallback(),
+#         #              EarlyStopping(monitor="val_loss_{}".format(self.current_fold),
+#         #                            min_delta=0.0,
+#         #                            check_on_train_epoch_end=True,
+#         #                            patience=5,
+#         #                            check_finite=True,
+#         #                            # stopping_threshold=1e-4,
+#         #                            mode='min'),
+#         #              ]
+#
+#         self.trainer.checkpoint_connector = CheckpointConnector(trainer=self.trainer, resume_from_checkpoint=self.export_path)
+#         self.trainer.state.fn = TrainerFn.FITTING
+#         self.trainer.strategy.setup_optimizers(self.trainer)
+#         self.replace(fit_loop=FitLoop)
+#
+#     def on_run_end(self) -> None:
+#         """Used to compute the performance of the ensemble model on the test set."""
+#         # checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
+#         # scv_model = SpatialCVModel(type(self.trainer.lightning_module), checkpoint_paths)
+#         # scv_model.trainer = self.trainer
+#         # This requires to connect the new model and move it the right device.
+#         # self.trainer.strategy.connect(scv_model)
+#         # self.trainer.strategy.model_to_device()
+#         # self.trainer.test_loop.run()
+#
+#     def on_save_checkpoint(self) -> Dict[str, int]:
+#         return {"current_fold": self.current_fold}
+#
+#     def on_load_checkpoint(self, state_dict: Dict) -> None:
+#         self.current_fold = state_dict["current_fold"]
+#
+#     def _reset_fitting(self) -> None:
+#         self.trainer.reset_train_dataloader()
+#         self.trainer.reset_val_dataloader()
+#         self.trainer.state.fn = TrainerFn.FITTING
+#         self.trainer.training = True
+#
+#     def _reset_testing(self) -> None:
+#         self.trainer.reset_test_dataloader()
+#         self.trainer.state.fn = TrainerFn.TESTING
+#         self.trainer.testing = True
+#
+#     def __getattr__(self, key) -> Any:
+#         # requires to be overridden as attributes of the wrapped loop are being accessed.
+#         if key not in self.__dict__:
+#             return getattr(self.fit_loop, key)
+#         return self.__dict__[key]
