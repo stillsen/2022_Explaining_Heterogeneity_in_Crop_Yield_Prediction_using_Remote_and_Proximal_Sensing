@@ -1,91 +1,147 @@
-import torchvision
+# -*- coding: utf-8 -*-
+"""
+Crop yield regression model implementing a ResNet50 in PyTorch Lightning in a transfer learning approach using
+RGB remote sensing observations
+"""
+
+# Built-in/Generic Imports
+
+# Libs
+import torch
+import torchvision.models as models
 import torch.nn as nn
-from functools import partial
+from torch.optim import SGD, Adam
 
-resnet_models = {18: torchvision.models.resnet18,
-                 34: torchvision.models.resnet34,
-                 50: torchvision.models.resnet18,
-                 101: torchvision.models.resnet101,
-                 152: torchvision.models.resnet152}
+from pytorch_lightning.core.lightning import LightningModule
+
+# Own modules
 
 
-class Resnet_multichannel(nn.Module):
-    def __init__(self, pretrained=True, encoder_depth=34, num_in_channels=4):
+__author__ = 'Stefan Stiller'
+__copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
+__credits__ = ['Stefan Stiller, Gohar Ghazaryan, Kathrin Grahmann, Masahiro Ryo']
+__license__ = 'GNU GPLv3'
+__version__ = '0.1'
+__maintainer__ = 'Stefan Stiller'
+__email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
+__status__ = 'Dev'
+
+class MCYieldRegressor(LightningModule):
+    def __init__(self, optimizer:str = 'sgd', k:int = 0, lr:float = 0.001, momentum:float = 0.8, wd:float = 0.01, batch_size:int = 16, pretrained:bool = True, tune_fc_only:bool = False, model: str = 'resnet50'):
         super().__init__()
 
-        if encoder_depth not in [18, 34, 50, 101, 152]:
-            raise ValueError(f"Encoder depth {encoder_depth} specified does not match any existing Resnet models")
+        self.lr = lr
+        self.momentum = momentum
+        self.wd = wd
+        self.batch_size = batch_size
+        self.k = k
 
-        model = resnet_models[encoder_depth](pretrained)
+        optimizers = {'adam': Adam, 'sgd': SGD}
+        self.optimizer = optimizers[optimizer]
 
-        ##For reference: layers to use (in order):
-        # conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool, fc
+        self.criterion = nn.MSELoss(reduction='mean')
 
-        # This is the most important line of code here. This increases the number of in channels for our network
-        self.conv1 = self.increase_channels(model.conv1, num_in_channels)
 
-        self.bn1 = model.bn1
-        self.relu = model.relu
-        self.maxpool = model.maxpool
-        self.layer1 = model.layer1
-        self.layer2 = model.layer2
-        self.layer3 = model.layer3
-        self.layer4 = model.layer4
-        self.avgpool = model.avgpool
-        self.fc = model.fc
-        print("")
+        self.model_arch = model
+
+        num_target_classes = 1
+        if self.model_arch == 'resnet50':
+            print('setting up resnet with lr = {}, m = {}, wd = {}'.format(lr, momentum, wd))
+            #### approach 2: 1 multi-tensor model
+            # drawback: no channel-wise requires-grad
+            self.model = models.resnet50(pretrained=pretrained)
+            # save pretrained rgb weights
+            conv1_rgb_weight = self.model.conv1.weight[:,:3,:,:]
+            # init ndvi channel, pretraining according to Ross Wightman as summation
+            conv1_ndvi_weight = self.model.conv1.weight.sum(dim=1, keepdim=True)
+            # replace 1st conv layer to have 4 channels, R G B and NDVI
+            self.model.conv1 = nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+            # initialize weights
+            # self.model.conv1.weight[:, :3, :, :] = conv1_rgb_weight
+            # self.model.conv1.weight[:, 3, :, :] = conv1_ndvi_weight
+            self.model.conv1.weight = nn.Parameter(torch.cat((conv1_rgb_weight, conv1_ndvi_weight), 1))
+
+            self.model.bn1 = nn.Sequential(
+                nn.Dropout2d(),
+                self.model.bn1
+            )
+
+            num_filters_rgb = self.model.fc.in_features
+            self.model.fc = nn.Sequential(
+                nn.ReLU(),
+                nn.Linear(num_filters_rgb, num_target_classes))
+        elif self.model_arch == 'densenet':
+            print('setting up densenet with lr = {}, m = {}, wd = {}'.format(lr, momentum, wd))
+            self.model = models.densenet121(pretrained=pretrained)
+            # save pretrained rgb weights
+            conv0_rgb_weight = self.model.features.conv0.weight[:,:3,:,:]
+            # init ndvi channel, pretraining according to Ross Wightman as summation
+            conv0_ndvi_weight = self.model.features.conv0.weight.sum(dim=1, keepdim=True)
+            # replace 1st conv layer to have 4 channels, R G B and NDVI
+            self.model.features.conv0 = nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+            # initialize weights
+            # self.model.features.conv0[:, :3, :, :] = conv0_rgb_weight
+            # self.model.features.conv0[:, 3, :, :] = conv0_ndvi_weight
+            self.model.features.conv0.weight = nn.Parameter(torch.cat((conv0_rgb_weight, conv0_ndvi_weight), 1))
+
+            self.model.features.norm0 = nn.Sequential(
+                nn.Dropout2d(),
+                self.model.features.norm0
+            )
+            num_filters = self.model.classifier.in_features
+            self.model.classifier = nn.Sequential(
+                nn.ReLU(),
+                nn.Linear(num_filters, num_target_classes))
+            # #### approach 2: 2 seperate models that are combine later
+            # # advantage: individually customisable for which layer require grad
+            # # diffuculty: how to combine
+
+
+            if tune_fc_only: # option to only tune the fully-connected layers
+                for child in list(self.model.children())[:-1]:
+                    for param in child.parameters():
+                        param.requires_grad = False
+
+
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        # self.feature_extractor.eval() # set model in evaluation mode -> DOESN'T Lightning do this automatically?
+        # with torch.no_grad():
+            # representations = self.feature_extractor(x).flatten(1)
+        # return self.regressor(representations)
+        return torch.flatten(self.model(x))
+        # return self.model(x)
 
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc()
+    def training_step(self, batch, batch_idx): # torch.autograd?
+        x, y = batch
+        y_hat = torch.flatten(self.model(x))
+        loss = self.criterion(y_hat, y)
+        # self.log("train_loss_{}".format(self.k), loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+        # return loss_fn(torch.flatten(y_hat), y)
 
-        return x
-
-    def increase_channels(self, m, num_channels=None, copy_weights=0):
-
-        """
-        takes as input a Conv2d layer and returns the a Conv2d layer with `num_channels` input channels
-        and all the previous weights copied into the new layer.
-        """
-        # number of input channels the new module should have
-        new_in_channels = num_channels if num_channels is not None else m.in_channels + 1
-
-        bias = False if m.bias is None else True
-
-        # Creating new Conv2d layer
-        new_m = nn.Conv2d(in_channels=new_in_channels,
-                          out_channels=m.out_channels,
-                          kernel_size=m.kernel_size,
-                          stride=m.stride,
-                          padding=m.padding,
-                          bias=bias)
-
-        # Copying the weights from the old to the new layer
-        new_m.weight[:, :m.in_channels, :, :] = m.weight.clone()
-
-        # Copying the weights of the `copy_weights` channel of the old layer to the extra channels of the new layer
-        for i in range(new_in_channels - m.in_channels):
-            channel = m.in_channels + i
-            new_m.weight[:, channel:channel + 1, :, :] = m.weight[:, copy_weights:copy_weights + 1, ::].clone()
-        new_m.weight = nn.Parameter(new_m.weight)
-
-        return new_m
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = torch.flatten(self.model(x))
+        loss = self.criterion(y_hat, y)
+        # perform logging
+        # self.log("val_loss_{}".format(self.k), loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
 
 
-def get_arch(encoder_depth, num_in_channels):
-    """
-    Returns just an architecture which can then be called in the usual way.
-    For example:
-    resnet34_4_channel = get_arch(34, 4)
-    model = resnet34_4_channel(True)
-    """
-    return partial(Resnet_multichannel, encoder_depth=encoder_depth, num_in_channels=num_in_channels)
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = torch.flatten(self.model(x))
+        loss = self.criterion(y_hat, y)
+        # perform logging
+        # self.log("test_loss_{}".format(self.k), loss, prog_bar=True, logger=True)
+        self.log("test_loss", loss, prog_bar=True, logger=True)
+
+    def predicts_step(self, batch, batch_idx, dataloader_idx=0):
+        return self.model(batch).squeeze()
+
+    def configure_optimizers(self):
+        return self.optimizer(self.parameters(), lr=self.lr, momentum=self.momentum, weight_decay=self.wd)
+
+
+    #def prediction_step(self): calls self.forward() by default, thus no override required here
