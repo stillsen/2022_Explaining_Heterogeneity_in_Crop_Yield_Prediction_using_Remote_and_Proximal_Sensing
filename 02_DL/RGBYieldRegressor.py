@@ -26,7 +26,8 @@ __maintainer__ = 'Stefan Stiller'
 __email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
 __status__ = 'Dev'
 
-class RGBYieldRegressor(LightningModule):
+# class RGBYieldRegressor(LightningModule):
+class RGBYieldRegressor:
     def __init__(self, optimizer:str = 'sgd', k:int = 0, lr:float = 0.001, momentum:float = 0.8, wd:float = 0.01, batch_size:int = 16, pretrained:bool = True, tune_fc_only:bool = False, model: str = 'resnet50'):
         super().__init__()
 
@@ -67,45 +68,34 @@ class RGBYieldRegressor(LightningModule):
                     for param in child.parameters():
                         param.requires_grad = False
 
-    def forward(self, x):
-        # self.feature_extractor.eval() # set model in evaluation mode -> DOESN'T Lightning do this automatically?
-        # with torch.no_grad():
-            # representations = self.feature_extractor(x).flatten(1)
-        # return self.regressor(representations)
-        return torch.flatten(self.model(x))
-        # return self.model(x)
-
-    def training_step(self, batch, batch_idx): # torch.autograd?
-        x, y = batch
-        y_hat = torch.flatten(self.model(x))
-        loss = self.criterion(y_hat, y)
-        # self.log("train_loss_{}".format(self.k), loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        return loss
-        # return loss_fn(torch.flatten(y_hat), y)
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = torch.flatten(self.model(x))
-        loss = self.criterion(y_hat, y)
-        # perform logging
-        # self.log("val_loss_{}".format(self.k), loss, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-
-
-    def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = torch.flatten(self.model(x))
-        loss = self.criterion(y_hat, y)
-        # perform logging
-        # self.log("test_loss_{}".format(self.k), loss, prog_bar=True, logger=True)
-        self.log("test_loss", loss, prog_bar=True, logger=True)
-
-    def predicts_step(self, batch, batch_idx, dataloader_idx=0):
-        return self.model(batch).squeeze()
-
-    def configure_optimizers(self):
-        return self.optimizer(self.parameters(), lr=self.lr, momentum=self.momentum, weight_decay=self.wd)
-
-
-    #def prediction_step(self): calls self.forward() by default, thus no override required here
+    # def forward(self, x):
+    #     return torch.flatten(self.model(x))
+    #
+    # def training_step(self, batch, batch_idx): # torch.autograd?
+    #     x, y = batch
+    #     y_hat = torch.flatten(self.model(x))
+    #     loss = self.criterion(y_hat, y)
+    #     self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    #     return loss
+    #
+    # def validation_step(self, batch, batch_idx):
+    #     x, y = batch
+    #     y_hat = torch.flatten(self.model(x))
+    #     loss = self.criterion(y_hat, y)
+    #     self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #
+    #
+    # def test_step(self, batch, batch_idx):
+    #     x, y = batch
+    #     y_hat = torch.flatten(self.model(x))
+    #     loss = self.criterion(y_hat, y)
+    #     self.log("test_loss", loss, prog_bar=True, logger=True)
+    #
+    # def predicts_step(self, batch, batch_idx, dataloader_idx=0):
+    #     return self.model(batch).squeeze()
+    #
+    # def configure_optimizers(self):
+    #     return self.optimizer(self.parameters(), lr=self.lr, momentum=self.momentum, weight_decay=self.wd)
+    #
+    #
+    # #def prediction_step(self): calls self.forward() by default, thus no override required here

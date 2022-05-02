@@ -31,6 +31,7 @@ import os.path as osp
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type
+from torch.utils.data import Subset
 
 import torch
 import torchvision.transforms as transforms
@@ -84,7 +85,7 @@ class PatchCROPDataModule(LightningDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, input_files: dict, data_dir: str = './', batch_size: int = 16, stride:int = 20, workers:int = 0, augmented:bool = False):
+    def __init__(self, input_files: dict, data_dir: str = './', batch_size: int = 20, stride:int = 10, workers:int = 0, augmented:bool = False):
         super().__init__()
         self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
@@ -100,8 +101,8 @@ class PatchCROPDataModule(LightningDataModule):
 
         # Datesets
         self.splits = [[] for i in range(self.num_folds)]
-        # 0-7 rotate for train and val; 8 is test set
-        self.split_idx = [split for split in KFold(self.num_folds-1).split(range(self.num_folds-1))]
+        # 0-8 rotate for train and val; 8 is test set
+        self.split_idx = [split for split in KFold(self.num_folds).split(range(self.num_folds))]
         self.setup_done = False
 
 
@@ -182,7 +183,7 @@ class PatchCROPDataModule(LightningDataModule):
                     torch.save(self.splits[idx], file_name)
             self.setup_done = True
 
-    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224, feature_RGB=True, transform_train: bool=True) -> None:
+    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224, feature_RGB=True, transform: bool=True) -> None:
         '''
         :param label_matrix: kriging interpolated yield maps
         :param feature_matrix: stack of feature maps, such as rgb remote sensing, multi-channel remote sensing or dsm or ndvi
@@ -191,7 +192,7 @@ class PatchCROPDataModule(LightningDataModule):
         :return:
         '''
         if self.augmented:
-            train_transformer = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
+            transformer = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
 
         fold_starts_x = [0, 774, 1548]
         fold_length_x = 774
@@ -227,7 +228,7 @@ class PatchCROPDataModule(LightningDataModule):
             feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
             feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
             feature_arr /= feature_arr_max.unsqueeze(1)
-        label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+        label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
 
         counter = 0
         for fold_x in fold_starts_x:
@@ -266,11 +267,11 @@ class PatchCROPDataModule(LightningDataModule):
                         label_kernel_img = label_fold_arr[y:y + kernel_size, x:x + kernel_size]
                         # transform kernel image
                         if self.augmented:
-                            if transform_train and counter < 8: # train: flip
-                                state = torch.get_rng_state()
-                                feature_kernel_img = train_transformer(feature_kernel_img)
+                            if transform:# and counter < 8: # train: flip
+                                state = torch.get_rng_state() # perform the same augmentation that is done to the feature to the label
+                                feature_kernel_img = transformer(feature_kernel_img)
                                 torch.set_rng_state(state)
-                                label_kernel_img = train_transformer(label_kernel_img)
+                                label_kernel_img = transformer(label_kernel_img)
 
                         if x==0 and y==0:
                             feature_tensor = feature_kernel_img.unsqueeze(0)
@@ -286,25 +287,31 @@ class PatchCROPDataModule(LightningDataModule):
         train_indices, val_indices = self.split_idx[fold_index]
         self.train_fold = ConcatDataset([self.splits[i] for i in train_indices])
         self.val_fold = ConcatDataset([self.splits[i] for i in val_indices])
-        self.test_dataset = self.splits[-1]
+        # print('train_folds {}'.format(train_indices))
+        # print('val_fold {}'.format(val_indices))
+        # self.test_dataset = self.splits[-1]
 
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
+    def train_dataloader(self, num_samples:int = None) -> DataLoader:
+        if num_samples == None:
+            return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
+        else:
+            return DataLoader(Subset(self.train_fold, range(num_samples)), batch_size=self.batch_size, num_workers=self.workers)
 
-    def val_dataloader(self) -> DataLoader:
-        # transformer = transforms.Compose([transforms.ToTensor()])
-        # return transformer(DataLoader(self.val_fold))
-        return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
+    def val_dataloader(self, num_samples:int = None) -> DataLoader:
+        if num_samples==None:
+            return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
+        else:
+            return DataLoader(Subset(self.val_fold,range(num_samples)), num_workers=self.workers, batch_size=self.batch_size)
 
-    def test_dataloader(self) -> DataLoader:
-        # transformer = transforms.Compose([transforms.ToTensor()])
-        # return transformer(DataLoader(self.test_dataset))
-        return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
+    # def test_dataloader(self) -> DataLoader:
+    #     # transformer = transforms.Compose([transforms.ToTensor()])
+    #     # return transformer(DataLoader(self.test_dataset))
+    #     return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
 
-    def predict_dataloader(self) -> DataLoader:
-        # transformer = transforms.Compose([transforms.ToTensor()])
-        # return transformer(DataLoader(self.test_dataset))
-        return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
+    # def predict_dataloader(self) -> DataLoader:
+    #     # transformer = transforms.Compose([transforms.ToTensor()])
+    #     # return transformer(DataLoader(self.test_dataset))
+    #     return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
 
     def __post_init__(cls):
         super().__init__()
