@@ -360,6 +360,8 @@ class PatchCROPDataModule:
                         else:
                             feature_tensor = torch.cat((feature_tensor,feature_kernel_img.unsqueeze(0)), 0)
                             label_tensor = torch.cat((label_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
+                label_tensor = label_tensor.type(torch.HalfTensor)
+                feature_tensor = feature_tensor.type(torch.HalfTensor)
                 self.splits[counter].append((feature_tensor,label_tensor))
                 counter += 1
 
