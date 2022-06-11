@@ -38,19 +38,20 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.dataset import Dataset, TensorDataset, ConcatDataset
+from torch.utils.data.dataset import Dataset, ConcatDataset
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import random
 
-from pytorch_lightning import LightningDataModule
-from pytorch_lightning.core.lightning import LightningModule
-from pytorch_lightning.loops.base import Loop
-from pytorch_lightning.loops.fit_loop import FitLoop
-from pytorch_lightning.trainer.states import TrainerFn
-from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
-from pytorch_lightning.callbacks import Callback, EarlyStopping
-
-from torchmetrics import R2Score
+# from pytorch_lightning import LightningDataModule
+# from pytorch_lightning.core.lightning import LightningModule
+# from pytorch_lightning.loops.base import Loop
+# from pytorch_lightning.loops.fit_loop import FitLoop
+# from pytorch_lightning.trainer.states import TrainerFn
+# from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
+# from pytorch_lightning.callbacks import Callback, EarlyStopping
+#
+# from torchmetrics import R2Score
 # from ignite.contrib.metrics.regression import R2Score
 # from ignite.engine import *
 
@@ -77,15 +78,35 @@ __status__ = 'Dev'
 #############################################################################################
 
 
-@dataclass
-class PatchCROPDataModule(LightningDataModule):
+class TransformTensorDataset(Dataset):
+    """TensorDataset with support of transforms.
+    """
+    def __init__(self, tensors, transform=None):
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        self.tensors = tensors
+        self.transform = transform
+
+    def __getitem__(self, index):
+        x = self.tensors[0][index]
+
+        if self.transform:
+            x = self.transform(x)
+
+        y = self.tensors[1][index]
+
+        return x, y
+
+    def __len__(self):
+        return self.tensors[0].size(0)
+
+class PatchCROPDataModule:
 
     train_dataset: Optional[Dataset] = None
     test_dataset: Optional[Dataset] = None
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, input_files: dict, data_dir: str = './', batch_size: int = 20, stride:int = 10, workers:int = 0, augmented:bool = False):
+    def __init__(self, input_files: dict, patch_id, data_dir: str = './', batch_size: int = 20, stride:int = 10, workers:int = 0, input_features:str = 'RGB', augmented:bool = False):
         super().__init__()
         self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
@@ -98,6 +119,8 @@ class PatchCROPDataModule(LightningDataModule):
         self.stride = stride
         self.workers = workers
         self.augmented = augmented
+        self.patch_id = patch_id
+        self.input_features = input_features
 
         # Datesets
         self.splits = [[] for i in range(self.num_folds)]
@@ -128,50 +151,60 @@ class PatchCROPDataModule(LightningDataModule):
         #                                     'nir': (0.77, 0.81),
         #                                     'rededge': (0.73, 0.74)}}
         # self.ms_band_order = ['green', 'nir', 'red', 'rededge']
-    def prepare_data(self) -> None: # would actually make more sense to put it to setup, but there it is called as several processes
+    def prepare_data(self, num_samples:int = None) -> None: # would actually make more sense to put it to setup, but there it is called as several processes
         # load the data
         # normalize
         # split
         # oversample
         # load over feature label combinations
-        if self.augmented:
-            kfold_dir = os.path.join(self.data_dir,'kfold_set_augmented')
-        else:
-            kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+        # if self.augmented:
+        #     kfold_dir = os.path.join(self.data_dir,'kfold_set_augmented')
+        # else:
+        #     kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+        kfold_dir = os.path.join(self.data_dir, 'kfold_set')
         if not self.setup_done:
             # check if already build and load
             if os.path.isdir(kfold_dir):
                 # load
-                for file in os.listdir(kfold_dir):
-                    k = file.split('.')[0][-1]
+                print('loading data')
+                for k in range(self.num_folds):
+                    if self.input_features == "RGB":
+                        file_name = 'Patch_ID_' + str(self.patch_id) + '_fold_' + str(k) + '.pt'
+                    elif self.input_features == "RGB+":
+                        file_name = 'Patch_ID_' + str(self.patch_id) + '_NDVI_fold_' + str(k) + '.pt'
+                    elif self.input_features == "MSI":
+                        file_name = 'Patch_ID_' + str(self.patch_id) + '_MSI_fold_' + str(k) + '.pt'
+
                     # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
-                    f = torch.load(os.path.join(kfold_dir, file))
+                    f = torch.load(os.path.join(kfold_dir, file_name))
                     self.splits[int(k)] = f
+                # for file in os.listdir(kfold_dir):
+                #     k = file.split('.')[0][-1]
+                #     # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
+                #     f = torch.load(os.path.join(kfold_dir, file))
+                #     self.splits[int(k)] = f
             else:
                 # otherwise build oversampled k-fold set
+                print('generating data')
                 for label, features in self.input_files.items():
                     label_matrix = torch.tensor([])
                     feature_matrix = torch.tensor([])
-
                     # load label
                     label_matrix = torch.tensor(gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray())
-
+                    # label_matrix = gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray()
                     # load and concat features
                     for idx, feature in enumerate(features):
                         # if RGB drop alpha channel, else all
                         if 'soda' in feature or 'Soda' in feature: # RGB
                             print(feature)
-                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3,:,:])
+                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3,:,:]) # only first 3 channels -> not alpha channel
                         else: # multichannel
                             f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray())
+                        # concat feature tensor, e.g. RGB tensor and NDVI tensor
                         if f.dim() == 2:
                             feature_matrix = torch.cat((feature_matrix, f.unsqueeze(0)), 0)
                         else:
                             feature_matrix = torch.cat((feature_matrix, f), 0)
-                    # # channel-wise z-score normalization --> nope!!! don't use for ttransfer learning. here we need normalization to [0. 1]
-                    # channel_wise_mean = [feature_matrix[i,:,:].mean() for i in range(feature_matrix.size()[0])]
-                    # channel_wise_std = [feature_matrix[i, :, :].std() for i in range(feature_matrix.size()[0])]
-                    # feature_matrix = TF.normalize(feature_matrix, channel_wise_mean, channel_wise_std)
 
                     # spatial splits for k fold spatial cross validation and call sliding window  -> 224x224 images
                     self.setup_folds(label_matrix, feature_matrix)
@@ -182,17 +215,37 @@ class PatchCROPDataModule(LightningDataModule):
                     file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'_fold_'+str(idx)+'.pt'
                     torch.save(self.splits[idx], file_name)
             self.setup_done = True
+        if num_samples != None:
+            idx = random.sample(range(3025), num_samples)
+            self.splits = [Subset(split, idx) for split in self.splits]
+            for idx in range(self.num_folds):
+                    file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'_subsample_'+str(num_samples)+'_fold_'+str(idx)+'.pt'
+                    torch.save(self.splits[idx], file_name)
 
-    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224, feature_RGB=True, transform: bool=True) -> None:
+    def load_subsamples(self, num_samples:int=None):
+        if num_samples != None:
+            kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+            # check if already build and load
+            if os.path.isdir(kfold_dir):
+                # load
+                for k in range(self.num_folds):
+                    file_name = 'Patch_ID_'+str(self.patch_id)+'_subsample_'+str(num_samples)+'_fold_'+str(k)+'.pt'
+                    # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
+                    f = torch.load(os.path.join(kfold_dir, file_name))
+                    self.splits[int(k)] = f
+        else:
+            raise ValueError('number of samples need to be > 1.')
+
+    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224) -> None:
         '''
         :param label_matrix: kriging interpolated yield maps
         :param feature_matrix: stack of feature maps, such as rgb remote sensing, multi-channel remote sensing or dsm or ndvi
         both are required to have same dimension, but have different size according to whether the patch is a flower strip
         or not
-        :return:
+        :return: constructs self.splits containing images (C H W) but in range [0 ... 255]
+        whereas RGB format would be (H W C) range [0 ... 255]
+        pytorch pretraining exptexted (C H W) [0...1]
         '''
-        if self.augmented:
-            transformer = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
 
         fold_starts_x = [0, 774, 1548]
         fold_length_x = 774
@@ -203,32 +256,71 @@ class PatchCROPDataModule(LightningDataModule):
             fold_starts_y = [0, 645, 1290]
             fold_length_y = 645
 
+        ############### DEBUG INSERT
+        fold_starts_x = [0, 0, 0]
+        fold_starts_y = [0, 0, 0]
+        ###############
+
         upper_bound_x = feature_matrix.shape[2] - lower_bound
         upper_bound_y = feature_matrix.shape[1] - lower_bound
 
         # clip to tightest inner rectangle
         # and normalize feature array to range [0,1]
         # this could be outsourced to transforms.toTensor(), however this would require the input to be a PIL image
-        if feature_RGB:
-            feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-            feature_arr[:3, :, :] /= 255 # normalzie RGB channels
-            if feature_arr.shape[0] > 3: # normalize rest of channels
-                # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-                feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
-                feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
-                feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
-                feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
-                # feature_arr_min = feature_arr.view(feature_arr.size(0), -1).min(1, keepdim=True)[0]  # get channel-wise min
-                # feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0]  # get channel-wise max
-                # feature_arr[3:, :, :] -= feature_arr_min.unsqueeze(1)  # channel-wise substraction
-                # feature_arr[3:, :, :] /= feature_arr_max.unsqueeze(1)
-        else:
+        feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+
+        # normalize non-rgb channels to a range [0...255]
+        # s.t. they can later be transformed to work with pre-training initialized weights
+        if self.input_features == 'RGB' or self.input_features == 'RGB+':
+            feature_arr[:3, :, :] = (feature_arr[:3, :, :] ) / 255
+        if self.input_features == 'RGB+':
+            # raise NotImplementedError('NDVI support for multi-modal multi-source input not yet supported')
+            if feature_arr.shape[0] > 3: # normalize rest of channels, i.e. NDVI
+                    # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+                    # feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
+                    # feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
+                    # feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
+                    # feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
+
+                    feature_arr[3, :, :] = (feature_arr[3, :, :] + 1) / 2
+            else:
+                raise ValueError("No NDVI channel found")
+        elif self.input_features == 'MSI':
+            # raise NotImplementedError("torch version, NumPy missing")
+            ##### torch version
             feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
             feature_arr_min = feature_arr.view(feature_arr.size(0),-1).min(1,keepdim=True)[0] # get channel-wise min
             feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
             feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
             feature_arr /= feature_arr_max.unsqueeze(1)
-        label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
+
+        ########  --> transforms ----> NOPEEEEEEE, otherwise one hell of type conversion messes
+        # if feature_RGB:
+        #     feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+        #     feature_arr[:3, :, :] /= 255 # normalzie RGB channels
+        #     if feature_arr.shape[0] > 3: # normalize rest of channels, i.e. NDVI
+        #         # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+        #         feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
+        #         feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
+        #         feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
+        #         feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
+        #         # feature_arr_min = feature_arr.view(feature_arr.size(0), -1).min(1, keepdim=True)[0]  # get channel-wise min
+        #         # feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0]  # get channel-wise max
+        #         # feature_arr[3:, :, :] -= feature_arr_min.unsqueeze(1)  # channel-wise substraction
+        #         # feature_arr[3:, :, :] /= feature_arr_max.unsqueeze(1)
+        # else:
+        #     feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
+        #     feature_arr_min = feature_arr.view(feature_arr.size(0),-1).min(1,keepdim=True)[0] # get channel-wise min
+        #     feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
+        #     feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
+        #     feature_arr /= feature_arr_max.unsqueeze(1)
+
+        ############### DEBUG INSERT
+        label_arr = (feature_arr[0,:,:] + feature_arr[1,:,:] + feature_arr[2,:,:])/3
+        # label_arr = feature_arr[1, :, :]
+        # label_arr = torch.max(feature_arr,dim=0)[0]
+        ############### DEBUG DISABLE
+        # label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
 
         counter = 0
         for fold_x in fold_starts_x:
@@ -257,51 +349,66 @@ class PatchCROPDataModule(LightningDataModule):
                         print("........... 50%")
                     if y == y_starts[int(len(y_starts) * 3 / 4)]:
                         print("........... 75%")
-                    # feature_tensor_row = torch.tensor([])
-                    # label_tensor_row = torch.tensor([])
                     for x in x_starts:
-                        # print('{}, {}'.format(x,y))
                         # shift kernel over image and extract kernel part
                         # only take RGB value
                         feature_kernel_img = feature_fold_arr[:, y:y + kernel_size, x:x + kernel_size]
                         label_kernel_img = label_fold_arr[y:y + kernel_size, x:x + kernel_size]
-                        # transform kernel image
-                        if self.augmented:
-                            if transform:# and counter < 8: # train: flip
-                                state = torch.get_rng_state() # perform the same augmentation that is done to the feature to the label
-                                feature_kernel_img = transformer(feature_kernel_img)
-                                torch.set_rng_state(state)
-                                label_kernel_img = transformer(label_kernel_img)
-
                         if x==0 and y==0:
                             feature_tensor = feature_kernel_img.unsqueeze(0)
                             label_tensor = label_kernel_img.mean().unsqueeze(0)
                         else:
                             feature_tensor = torch.cat((feature_tensor,feature_kernel_img.unsqueeze(0)), 0)
                             label_tensor = torch.cat((label_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
-                label_tensor = label_tensor.type(torch.FloatTensor)
-                self.splits[counter].append(TensorDataset(feature_tensor,label_tensor))
+                self.splits[counter].append((feature_tensor,label_tensor))
                 counter += 1
 
     def setup_fold_index(self, fold_index: int) -> None:
+        '''
+        Sets up validation and train data set and applies normalization for both and augmentations for the train set if
+        self.augmented.
+        :param fold_index: index of the validation set, folds with i != fold_index are combined to train set
+        :return: None
+        '''
+        # get indices
         train_indices, val_indices = self.split_idx[fold_index]
-        self.train_fold = ConcatDataset([self.splits[i] for i in train_indices])
-        self.val_fold = ConcatDataset([self.splits[i] for i in val_indices])
-        # print('train_folds {}'.format(train_indices))
-        # print('val_fold {}'.format(val_indices))
-        # self.test_dataset = self.splits[-1]
 
-    def train_dataloader(self, num_samples:int = None) -> DataLoader:
-        if num_samples == None:
-            return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
-        else:
-            return DataLoader(Subset(self.train_fold, range(num_samples)), batch_size=self.batch_size, num_workers=self.workers)
+        if self.input_features == 'RGB':
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                             std=[0.229, 0.224, 0.225])
+        elif self.input_features == 'RGB+':
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406, 0],
+                                             std=[0.229, 0.224, 0.225, 1])
 
-    def val_dataloader(self, num_samples:int = None) -> DataLoader:
-        if num_samples==None:
-            return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
-        else:
-            return DataLoader(Subset(self.val_fold,range(num_samples)), num_workers=self.workers, batch_size=self.batch_size)
+
+        # set up train and validation data set and apply respective transformations and/or augmentations
+        # given by pytorch and ImageNet pretraining
+        transformer = transforms.Compose([#transforms.ToPILImage(),
+                                          #transforms.ToTensor(),
+                                          normalize,
+                                          ])
+
+        self.val_fold = ConcatDataset([TransformTensorDataset(self.splits[i],transform=transformer) for i in val_indices])
+
+        # only train set would be augmented if enabled
+        if self.augmented:
+            transformer = transforms.Compose([#transforms.ToPILImage(),
+                                              #transforms.ToTensor(),
+                                              normalize,
+                                              transforms.RandomHorizontalFlip(),
+                                              transforms.RandomVerticalFlip(),
+                                              ])
+
+        self.train_fold = ConcatDataset([TransformTensorDataset(self.splits[i], transform=transformer) for i in train_indices])
+
+
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
+
+
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
 
     # def test_dataloader(self) -> DataLoader:
     #     # transformer = transforms.Compose([transforms.ToTensor()])

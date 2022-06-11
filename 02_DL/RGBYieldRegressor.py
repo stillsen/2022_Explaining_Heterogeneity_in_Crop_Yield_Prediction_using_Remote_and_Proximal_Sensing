@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Crop yield regression model implementing a ResNet50 in PyTorch Lightning in a transfer learning approach using
+Wrapper class for crop yield regression model employing a ResNet50 or densenet in PyTorch in a transfer learning approach using
 RGB remote sensing observations
 """
 
@@ -10,9 +10,8 @@ RGB remote sensing observations
 import torch
 import torchvision.models as models
 import torch.nn as nn
-from torch.optim import SGD, Adam
 
-from pytorch_lightning.core.lightning import LightningModule
+# from pytorch_lightning.core.lightning import LightningModule
 
 # Own modules
 
@@ -28,19 +27,14 @@ __status__ = 'Dev'
 
 # class RGBYieldRegressor(LightningModule):
 class RGBYieldRegressor:
-    def __init__(self, optimizer:str = 'sgd', k:int = 0, lr:float = 0.001, momentum:float = 0.8, wd:float = 0.01, batch_size:int = 16, pretrained:bool = True, tune_fc_only:bool = False, model: str = 'resnet50'):
-        super().__init__()
+    def __init__(self, k:int = 9, lr:float = 0.001, momentum:float = 0.8, wd:float = 0.01, batch_size:int = 16, pretrained:bool = True, tune_fc_only:bool = True, model: str = 'densenet'):
+        # super(RGBYieldRegressor, self).__init__()
 
         self.lr = lr
         self.momentum = momentum
         self.wd = wd
         self.batch_size = batch_size
         self.k = k
-
-        optimizers = {'adam': Adam, 'sgd': SGD}
-        self.optimizer = optimizers[optimizer]
-
-        self.criterion = nn.MSELoss(reduction='mean')
 
         self.model_arch = model
 
@@ -67,6 +61,27 @@ class RGBYieldRegressor:
                 for child in list(self.model.children())[:-1]:
                     for param in child.parameters():
                         param.requires_grad = False
+
+        self.optimizer = torch.optim.SGD(params=self.model.parameters(),
+                                            lr=lr,
+                                            momentum=momentum,
+                                            weight_decay=wd)
+
+        self.criterion = nn.MSELoss(reduction='mean')
+
+
+    def enable_grads(self):
+        for child in list(self.model.children()):
+            for param in child.parameters():
+                param.requires_grad = True
+
+    def update_optimizer(self, lr, momentum, wd):
+        self.optimizer = torch.optim.SGD(params=self.model.parameters(),
+                                         lr=lr,
+                                         momentum=momentum,
+                                         weight_decay=wd)
+    def update_criterion(self, loss: torch.nn.modules.loss):
+        self.criterion = loss
 
     # def forward(self, x):
     #     return torch.flatten(self.model(x))
