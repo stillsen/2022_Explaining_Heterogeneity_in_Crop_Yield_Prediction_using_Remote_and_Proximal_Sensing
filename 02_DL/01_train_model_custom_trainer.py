@@ -4,25 +4,25 @@ script to train model
 """
 
 # Built-in/Generic Imports
-import time
 import os
-from copy import deepcopy
 import random
 
 # Libs
-# from pytorch_lightning import seed_everything, Trainer
-from sklearn.metrics import r2_score
 import numpy as np
-import  pandas as pd
+import pandas as pd
+
+import time
+from copy import deepcopy
+
+from ray import tune
+from ray.tune.schedulers import ASHAScheduler
+from ray.util import inspect_serializability
+
 
 import torch
 from torch import nn
-import torchvision.models as models
 
-from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
-from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
-
+import warnings
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule
 from RGBYieldRegressor import RGBYieldRegressor
@@ -39,83 +39,6 @@ __maintainer__ = 'Stefan Stiller'
 __email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
 __status__ = 'Dev'
 
-
-def train_model(model, dataloaders, criterion, optimizer, device, patience:int =20, delta:float =0, num_epochs=25):
-    since = time.time()
-    val_mse_history = []
-    train_mse_history = []
-
-    # mse = MeanSquaredError()
-
-    best_model_wts = deepcopy(model.state_dict())
-    best_loss = np.inf
-    best_epoch = 0
-
-    for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
-        print('-' * 10)
-
-        if patience == 0:
-            break
-        epoch_loss = 0
-        # Each epoch has a training and validation phase
-        for phase in ['train', 'val']:
-            if phase == 'train':
-                model.train()  # Set model to training mode
-            else:
-                model.eval()   # Set model to evaluate mode
-            running_loss = 0.0
-
-            # print('phase: {}'.format(phase))
-            # Iterate over data.
-            counter = 0
-            for inputs, labels in dataloaders[phase]:
-                # print(counter)
-                # counter += 1
-                #
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                # zero the parameter gradients
-                optimizer.zero_grad()
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = criterion(torch.flatten(outputs), labels.data)
-                    # loss = criterion(outputs, labels.data)
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
-                # statistics
-                running_loss += loss.item() * inputs.size(0)
-
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            print('{} Loss: {:.4f}'.format(phase, epoch_loss))
-
-            if phase == 'train':
-            # if phase == 'val':
-                if (epoch_loss - best_loss) < delta:
-                    print('saving best model')
-                    best_loss = epoch_loss
-                    best_model_wts = deepcopy(model.state_dict())
-                    best_epoch = epoch
-                    patience = 20
-                else:#no improvement
-                    print('patience: {}'.format(patience))
-                    patience -= 1
-            if phase == 'val':
-                val_mse_history.append(epoch_loss)
-            if phase == 'train':
-                train_mse_history.append(epoch_loss)
-
-    time_elapsed = time.time() - since
-    print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    # print('Best val MSE: {:4f}'.format(best_mse))
-    print('Best val MSE: {:4f}'.format(best_loss))
-
-    # load best model weights
-    model.load_state_dict(best_model_wts)
-    return model, val_mse_history, train_mse_history, best_epoch
 
 def compare_models(model_1, model_2):
     models_differ = 0
@@ -144,10 +67,10 @@ if __name__ == "__main__":
     input_files = dict()
     input_files_rgb = dict()
 
-    data_root = '/beegfs/stiller/PatchCROP_all/Data/'
-    # data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
-    output_root = '/beegfs/stiller/PatchCROP_all/Output/'
-    # output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
+    # data_root = '/beegfs/stiller/PatchCROP_all/Data/'
+    data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
+    # output_root = '/beegfs/stiller/PatchCROP_all/Output/'
+    output_root = '../../Output/'
 
     ## Patch 12
     output_dirs[12] = os.path.join(output_root,'Patch_ID_12')
@@ -160,14 +83,33 @@ if __name__ == "__main__":
     input_files_rgb[12] = {'pC_col_2020_plant_PS412_Pha_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_12.tif']}
 
 
-    ## Patch 73
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_not_augmented_custom_btf_test')
-    output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densened_augmented_custom_btf_art_labels_hyper')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_not_augmented_custom_btf_s3000')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_custom_s2000')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB+_densenet_augmented_custom_btf_s1000')
+    ## Patch 68
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
+    output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_fixhyperparams')
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_tunedhyperparams')
 
-    # data_dirs[73] = os.path.join(data_root, 'Patch_ID_73_0307')
+    data_dirs[68] = os.path.join(data_root, 'Patch_ID_68')
+    # data_dirs[73] = os.path.join(data_root, 'Patch_ID_68_NDVI')
+
+    # input_files[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg_sequ_11062020_dsm_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_sequ_11062020_index_ndvi_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_sequ_11062020_transparent_reflectance_merged_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_73.tif']
+    #                    }
+    input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif']}
+    # input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif',
+    #                                                                       'Tempelberg_sequ_16072020_index_ndvi_aligned_Patch_ID_68.tif',
+    #                                                                       ]}
+
+
+    ## Patch 73
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet3_augmented_fakelabels_fixhyperparams')
+    output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_fakelabels_tunedhyperparams_all_nonspatialCV')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_fakelabels_tunedhyperparams')
+
     data_dirs[73] = os.path.join(data_root, 'Patch_ID_73')
     # data_dirs[73] = os.path.join(data_root, 'Patch_ID_73_NDVI')
 
@@ -244,93 +186,150 @@ if __name__ == "__main__":
     ## HYPERPARAMETERS
     num_epochs = 200
     num_epochs_finetuning = 10
-    lr = 0.001
+    lr = 0.001 # (Krizhevsky et al.2012)
     lr_finetuning = 0.0001
-    momentum = 0.9
-    wd = 0#0.01
+    momentum = 0.9 # (Krizhevsky et al.2012)
+    wd = 0.0005 # (Krizhevsky et al.2012)
     classes = 1
-    batch_size = 200#20
+    batch_size = 128 #(Krizhevsky et al.2012)
     num_folds = 9
+    min_delta = 0.01 # aka 1%
+    patience = 20
+    patience_fine_tuning = 2
 
     patch_no = 73
+    # patch_no = 68
     stride = 10 # 20 is too small
+    # architecture = 'baselinemodel'
     architecture = 'densenet'
+    # architecture = 'short_densenet'
     # architecture = 'resnet50'
     augmentation = True
     tune_fc_only = True
+    pretrained = True
     features = 'RGB'
     # features = 'RGB+'
     num_samples_per_fold = None
+    # scv = True
+    scv = False
+    fake_labels = True
 
     this_output_dir = output_dirs[patch_no]
 
     print('Setting up data in {}'.format(data_dirs[patch_no]))
-    datamodule = PatchCROPDataModule(input_files=input_files_rgb[patch_no], patch_id=patch_no, data_dir=data_dirs[patch_no], stride=stride, workers=os.cpu_count(), augmented=augmentation, input_features=features, batch_size=batch_size)
+    datamodule = PatchCROPDataModule(input_files=input_files_rgb[patch_no],
+                                     patch_id=patch_no,
+                                     data_dir=data_dirs[patch_no],
+                                     stride=stride,
+                                     workers=os.cpu_count(),
+                                     augmented=augmentation,
+                                     input_features=features,
+                                     batch_size=batch_size,
+                                     scv=scv,
+                                     fake_labels = fake_labels,
+                                     )
     datamodule.prepare_data(num_samples=num_samples_per_fold)
 
     print('working on patch {}'.format(patch_no))
     # loop over folds, last fold is for testing only
 
+    # Detect if we have a GPU available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print('working on device %s' % device)
 
     ############################### DEBUG
+    warnings.warn('training on 1 fold', FutureWarning)
     # for k in range(num_folds):
     for k in range(1):
+        print('#'*20)
         print(f"STARTING FOLD {k}")
-        # Detect if we have a GPU available
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print('working on device %s' % device)
+
 
         # data
         datamodule.setup_fold_index(k)
         dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader()}
 
-        #### TUNE LAST LAYER, FREEZE BEFORE::
+        #### TRAIN LAST LAYER ONLY, FREEZE BEFORE::
         if features == 'RGB':
-            model_wrapper = RGBYieldRegressor(pretrained=True, tune_fc_only=True, model=architecture, lr=lr, wd=wd, momentum=momentum)
+            model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
+                                              device=device,
+                                              lr=lr,
+                                              momentum=momentum,
+                                              wd=wd,
+                                              k=num_folds,
+                                              pretrained=pretrained,
+                                              tune_fc_only=tune_fc_only,
+                                              model=architecture,
+                                              )
         elif features == 'RGB+':
             model_wrapper = MCYieldRegressor(pretrained=True, tune_fc_only=True, model=architecture, lr=lr, wd=wd)
 
-        # Send the model to GPU
+        # Parallelize model
+        if torch.cuda.device_count() > 1:
+            model_wrapper.model = nn.DataParallel(model_wrapper.model)
         model_wrapper.model.to(device)
 
+        # for param in model_wrapper.model.parameters(): print(param.requires_grad)
+
+        # warnings.warn('training missing', FutureWarning)
         # Train and evaluate
         print('training for {} epochs'.format(num_epochs))
-        best_model, val_losses, train_losses, best_epoch = train_model(model=model_wrapper.model,
-                                                                       dataloaders=dataloaders_dict,
-                                                                       criterion=model_wrapper.criterion,
-                                                                       optimizer=model_wrapper.optimizer,
-                                                                       delta=0,
-                                                                       patience=10,
-                                                                       device=device,
-                                                                       num_epochs=num_epochs,
-                                                                       )
-        #### Fine-tuning all layers::
-        model_wrapper.model = best_model
+        model_wrapper.train_model(patience=patience,
+                                  min_delta=min_delta,
+                                  num_epochs=num_epochs,
+                                  )
+        # best_model, val_losses, train_losses, best_epoch = train_model(model=model_wrapper.model,
+        #                                                                dataloaders=dataloaders_dict,
+        #                                                                criterion=model_wrapper.criterion,
+        #                                                                optimizer=model_wrapper.optimizer,
+        #                                                                delta=0,
+        #                                                                patience=10,
+        #                                                                device=device,
+        #                                                                num_epochs=num_epochs,
+        #                                                                )
+
+
+        # warnings.warn('fine-tuning missing', FutureWarning)
+        # warnings.warn('fine-tuning: optimizer needs state_dict loaded', FutureWarning)
+
+        # #### Fine-tuning all layers::
+        # enable gradient computation for all layers
         model_wrapper.enable_grads()
-        model_wrapper.update_criterion(nn.MSELoss(reduction='mean'))
-        model_wrapper.update_optimizer( lr=lr_finetuning, momentum=momentum, weight_decay=wd)
-        # Train and evaluate
+        # set hyperparams for optimizer
+        model_wrapper.set_optimizer( lr=lr_finetuning,
+                                     momentum=momentum,
+                                     wd=wd,
+                                     )
+        # reinitialize optimizer state
+        model_wrapper.optimizer.load_state_dict(model_wrapper.optimizer_state_dict)
+
         print('fine-tuning all layers for {} epochs'.format(num_epochs_finetuning))
-        best_model, ft_val_losses, ft_train_losses, ft_best_epoch = train_model(model=model_wrapper.model,
-                                                                       dataloaders=dataloaders_dict,
-                                                                       criterion=model_wrapper.criterion,
-                                                                       optimizer=model_wrapper.optimizer,
-                                                                       delta=0,
-                                                                       patience=5,
-                                                                       device=device,
-                                                                       num_epochs=num_epochs_finetuning,
-                                                                       )
+        model_wrapper.train_model(patience=patience_fine_tuning,
+                                  min_delta=min_delta,
+                                  num_epochs=num_epochs_finetuning,
+                                  )
+        # best_model, ft_val_losses, ft_train_losses, ft_best_epoch = train_model(model=model_wrapper.model,
+        #                                                                dataloaders=dataloaders_dict,
+        #                                                                criterion=model_wrapper.criterion,
+        #                                                                optimizer=model_wrapper.optimizer,
+        #                                                                delta=0,
+        #                                                                patience=5,
+        #                                                                device=device,
+        #                                                                num_epochs=num_epochs_finetuning,
+        #                                                                )
 
 
         # save best model
-        torch.save(best_model.state_dict(), os.path.join(this_output_dir, 'model_f' + str(k) + '.ckpt'))
+        torch.save(model_wrapper.model.state_dict(), os.path.join(this_output_dir, 'model_f' + str(k) + '.ckpt'))
         # save training statistics
-        df = pd.DataFrame({'train_loss': train_losses,
-                           'val_loss': val_losses,
-                           'best_epoch': best_epoch,
-                           'ft_val_loss':ft_val_losses,
-                           'ft_train_loss':ft_train_losses,
-                           'ft_best_epoch':ft_best_epoch})
+
+        df = pd.DataFrame({'train_loss': model_wrapper.train_mse_history,
+                           'val_loss': model_wrapper.val_mse_history,
+                           'best_epoch': model_wrapper.best_epoch,
+                           # 'ft_val_loss':ft_val_losses,
+                           # 'ft_train_loss':ft_train_losses,
+                           # 'ft_best_epoch':ft_best_epoch,
+                           })
         df.to_csv(os.path.join(this_output_dir, 'training_statistics_f' + str(k) + '.csv'), encoding='utf-8')
 
         ## compare models

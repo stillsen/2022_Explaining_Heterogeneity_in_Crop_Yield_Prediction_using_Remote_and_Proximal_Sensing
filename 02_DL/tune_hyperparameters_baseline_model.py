@@ -82,8 +82,10 @@ class TuneYieldRegressor(tune.Trainable):
 
         ## Patch 73
         # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
-        # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_all')
-        output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_1')
+        # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baseline_augmented_fakelabels_raytuning_lr')
+        # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baseline_augmented_fakelabels_raytuning_wd')
+        output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baseline_augmented_raytuning_lr')
+        # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_raytuning')
         # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_fakelabels_fixhyperparams')
         # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_fakelabels_tunedhyperparams')
 
@@ -121,9 +123,13 @@ class TuneYieldRegressor(tune.Trainable):
         # architecture = 'resnet50'
         augmentation = True
         tune_fc_only = False
+        pretrained = False
         features = 'RGB'
         # features = 'RGB+'
         num_samples_per_fold = None
+        scv = True
+        # scv = False
+        fake_labels = False
 
         this_output_dir = output_dirs[patch_no]
 
@@ -135,8 +141,10 @@ class TuneYieldRegressor(tune.Trainable):
                                          workers=os.cpu_count(),
                                          augmented=augmentation,
                                          input_features=features,
-                                         # batch_size=batch_size,
-                                         batch_size=config['batch_size'],
+                                         batch_size=batch_size,
+                                         # batch_size=config['batch_size'],
+                                         scv=scv,
+                                         fake_labels=fake_labels,
                                          )
         datamodule.prepare_data(num_samples=num_samples_per_fold)
 
@@ -162,12 +170,13 @@ class TuneYieldRegressor(tune.Trainable):
             if features == 'RGB':
                 self.model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
                                                   device=self.device,
+                                                  # lr=lr,
                                                   lr=config['lr'],
                                                   momentum=momentum, #config['momentum'],
-                                                  wd=config['wd'],
-                                                  # wd=wd,
+                                                  # wd=config['wd'],
+                                                  wd=wd,
                                                   k=num_folds,
-                                                  pretrained=True,
+                                                  pretrained=pretrained,
                                                   tune_fc_only=tune_fc_only,
                                                   model=architecture,
                                                   )
@@ -215,11 +224,11 @@ class TuneYieldRegressor(tune.Trainable):
 
 if __name__ == "__main__":
     param_space = {
-        # "lr": tune.loguniform(1e-4, 1e-2),
-        "lr": tune.grid_search([5*1e-3, 1e-3, 1e-4]),
+        "lr": tune.loguniform(1e-5, 1e-1),
+        # "lr": tune.grid_search([5*1e-3, 1e-3, 1e-4]),
         # "momentum": tune.uniform(0.7, 0.99),
-        "wd": tune.grid_search([1e-3, 1e-4, 1e-5, 0]),
-        "batch_size": tune.grid_search([8, 16, 32, 64, 128, 256, 512]),
+        # "wd": tune.grid_search([5*1e-3, 1e-3, 5*1e-4, 1e-4, 5*1e-5, 1e-5, 0]),
+        # "batch_size": tune.grid_search([8, 16, 32, 64, 128, 256, 512]),
     }
 
     hyperband = ASHAScheduler(metric="val_loss", mode="min")
@@ -230,17 +239,17 @@ if __name__ == "__main__":
                         stop={"training_iteration" : 20},
                         config=param_space,
                         resources_per_trial={"gpu":2},
-                        # metric='val_loss',
-                        # mode='min',
-                        # num_samples=10,
-                        scheduler=hyperband,
+                        metric='val_loss',
+                        mode='min',
+                        num_samples=20,
+                        # scheduler=hyperband,
                         resume="AUTO",
-                        name='TuneYieldRegressor_clr_wd_bs',
+                        name='TuneYieldRegressor_baseline_orig_lr',
                         )
     print('best config: ', analysis.get_best_config(metric="train_loss", mode="min"))
     print('best config: ', analysis.get_best_config(metric="val_loss", mode="min"))
 
     # output_dir = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/Patch_ID_73_RGB_densenet_augmented_custom_btf_art_labels_ray'
-    output_dir = '/beegfs/stiller/PatchCROP_all/Output/Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_all'
+    output_dir = '/beegfs/stiller/PatchCROP_all/Output/Patch_ID_73_RGB_baseline_augmented_raytuning_lr'
     # output_dir = '/beegfs/stiller/PatchCROP_all/Output/Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_1'
     torch.save(analysis, os.path.join(output_dir, 'analysis.ray'))
