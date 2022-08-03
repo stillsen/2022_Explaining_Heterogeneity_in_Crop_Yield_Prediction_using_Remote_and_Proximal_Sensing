@@ -43,6 +43,8 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import random
 
+from sklearn.model_selection import train_test_split
+
 # from pytorch_lightning import LightningDataModule
 # from pytorch_lightning.core.lightning import LightningModule
 # from pytorch_lightning.loops.base import Loop
@@ -106,7 +108,17 @@ class PatchCROPDataModule:
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, input_files: dict, patch_id, data_dir: str = './', batch_size: int = 20, stride:int = 10, workers:int = 0, input_features:str = 'RGB', augmented:bool = False):
+    def __init__(self,
+                 input_files: dict,
+                 patch_id,
+                 data_dir: str = './',
+                 batch_size: int = 20,
+                 stride:int = 10,
+                 workers:int = 0,
+                 input_features:str = 'RGB',
+                 augmented:bool = False,
+                 scv:bool = True,
+                 fake_labels:bool = True):
         super().__init__()
         self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
@@ -114,17 +126,21 @@ class PatchCROPDataModule:
         self.data_dir = data_dir
         # name of the label file
         self.input_files = input_files
-        self.num_folds = 9
         self.batch_size = batch_size
         self.stride = stride
         self.workers = workers
         self.augmented = augmented
         self.patch_id = patch_id
         self.input_features = input_features
+        self.scv = scv
+        self.fake_labels = fake_labels
 
         # Datesets
+        if self.scv:
+            self.num_folds = 9
+        else:
+            self.num_folds = 2
         self.splits = [[] for i in range(self.num_folds)]
-        # 0-8 rotate for train and val; 8 is test set
         self.split_idx = [split for split in KFold(self.num_folds).split(range(self.num_folds))]
         self.setup_done = False
 
@@ -161,7 +177,16 @@ class PatchCROPDataModule:
         #     kfold_dir = os.path.join(self.data_dir,'kfold_set_augmented')
         # else:
         #     kfold_dir = os.path.join(self.data_dir, 'kfold_set')
-        kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+        if self.fake_labels:
+            if self.scv:
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_fakelabels')
+            else:
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_nonspatial_fakelabels')
+        else:
+            if self.scv:
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels')
+            else:
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_nonspatial_origlabels')
         if not self.setup_done:
             # check if already build and load
             if os.path.isdir(kfold_dir):
@@ -190,16 +215,16 @@ class PatchCROPDataModule:
                     label_matrix = torch.tensor([])
                     feature_matrix = torch.tensor([])
                     # load label
-                    label_matrix = torch.tensor(gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray())
+                    label_matrix = torch.tensor(gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray(), dtype=torch.float)
                     # label_matrix = gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray()
                     # load and concat features
                     for idx, feature in enumerate(features):
                         # if RGB drop alpha channel, else all
                         if 'soda' in feature or 'Soda' in feature: # RGB
                             print(feature)
-                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3,:,:]) # only first 3 channels -> not alpha channel
+                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3,:,:], dtype=torch.float) # only first 3 channels -> not alpha channel
                         else: # multichannel
-                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray())
+                            f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray(), dtype=torch.float)
                         # concat feature tensor, e.g. RGB tensor and NDVI tensor
                         if f.dim() == 2:
                             feature_matrix = torch.cat((feature_matrix, f.unsqueeze(0)), 0)
@@ -247,19 +272,28 @@ class PatchCROPDataModule:
         pytorch pretraining exptexted (C H W) [0...1]
         '''
 
-        fold_starts_x = [0, 774, 1548]
-        fold_length_x = 774
-        if feature_matrix.shape[1] == 2977: # -> no flower strip patch
-            fold_starts_y = [0, 774, 1548]
-            fold_length_y = 774
-        else: # flower strip patch
-            fold_starts_y = [0, 645, 1290]
-            fold_length_y = 645
+        if self.scv: # Spatial Cross Validation
+            fold_starts_x = [0, 774, 1548]
+            fold_length_x = 774
+            if feature_matrix.shape[1] == 2977: # -> no flower strip patch
+                fold_starts_y = [0, 774, 1548]
+                fold_length_y = 774
+            else: # flower strip patch
+                fold_starts_y = [0, 645, 1290]
+                fold_length_y = 645
 
-        ############### DEBUG INSERT
-        fold_starts_x = [0, 0, 0]
-        fold_starts_y = [0, 0, 0]
-        ###############
+            # ############### DEBUG INSERT
+            # fold_starts_x = [0, 0, 0]
+            # fold_starts_y = [0, 0, 0]
+            # ###############
+        else:# One block for non-spatial cross validation
+            fold_starts_x = [0, ]
+            fold_starts_y = [0, ]
+            fold_length_x = 2322
+            if feature_matrix.shape[1] == 2977: # -> no flower strip patch
+                fold_length_y = 2322
+            else: # flower strip patch
+                fold_length_y = 1935
 
         upper_bound_x = feature_matrix.shape[2] - lower_bound
         upper_bound_y = feature_matrix.shape[1] - lower_bound
@@ -315,12 +349,11 @@ class PatchCROPDataModule:
         #     feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
         #     feature_arr /= feature_arr_max.unsqueeze(1)
 
-        ############### DEBUG INSERT
-        label_arr = (feature_arr[0,:,:] + feature_arr[1,:,:] + feature_arr[2,:,:])/3
-        # label_arr = feature_arr[1, :, :]
-        # label_arr = torch.max(feature_arr,dim=0)[0]
-        ############### DEBUG DISABLE
-        # label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
+
+        if self.fake_labels:
+            label_arr = (feature_arr[0,:,:] + feature_arr[1,:,:] + feature_arr[2,:,:])/3
+        else:
+            label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
 
         counter = 0
         for fold_x in fold_starts_x:
@@ -343,6 +376,7 @@ class PatchCROPDataModule:
                 feature_tensor = None
                 label_tensor = None
                 for y in y_starts:
+                    print('y: {}'.format(y))
                     if y == y_starts[int(len(y_starts) / 4)]:
                         print("........... 25%")
                     if y == y_starts[int(len(y_starts) / 2)]:
@@ -360,10 +394,19 @@ class PatchCROPDataModule:
                         else:
                             feature_tensor = torch.cat((feature_tensor,feature_kernel_img.unsqueeze(0)), 0)
                             label_tensor = torch.cat((label_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
-                label_tensor = label_tensor.type(torch.HalfTensor)
-                feature_tensor = feature_tensor.type(torch.HalfTensor)
-                self.splits[counter].append((feature_tensor,label_tensor))
-                counter += 1
+                if self.scv:
+                    # label_tensor = label_tensor.type(torch.HalfTensor) # HalfTensor is only CPU Type
+                    # feature_tensor = feature_tensor.type(torch.HalfTensor)
+                    self.splits[counter].append((feature_tensor,label_tensor))
+                    counter += 1
+                else: # create foldsfor non-spatial random CV
+                    non_spatial_cv_split_idxs = train_test_split(np.arange(len(feature_tensor)))
+                    # append train set
+                    self.splits[counter].append((feature_tensor[non_spatial_cv_split_idxs[0], :, :, :], label_tensor[non_spatial_cv_split_idxs[0]]))
+                    # append test set
+                    counter += 1
+                    self.splits[counter].append((feature_tensor[non_spatial_cv_split_idxs[1], :, :, :], label_tensor[non_spatial_cv_split_idxs[1]]))
+
 
     def setup_fold_index(self, fold_index: int) -> None:
         '''
@@ -373,7 +416,10 @@ class PatchCROPDataModule:
         :return: None
         '''
         # get indices
-        train_indices, val_indices = self.split_idx[fold_index]
+        if self.scv:
+            train_indices, val_indices = self.split_idx[fold_index]
+        else:
+            val_indices, train_indices = self.split_idx[fold_index]
 
         if self.input_features == 'RGB':
             normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -406,10 +452,12 @@ class PatchCROPDataModule:
 
 
     def train_dataloader(self) -> DataLoader:
+        print('loading training set with {} samples'.format(len(self.train_fold)))
         return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
 
 
     def val_dataloader(self) -> DataLoader:
+        print('loading validation set with {} samples'.format(len(self.val_fold)))
         return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
 
     # def test_dataloader(self) -> DataLoader:
