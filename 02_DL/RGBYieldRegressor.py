@@ -26,6 +26,7 @@ import torchvision.models as models
 import torch.nn as nn
 from torch.nn.parameter import Parameter
 from torchvision.models.densenet import DenseNet
+from torchvision.models.resnet import ResNet
 
 # Own modules
 from BaselineModel import BaselineModel
@@ -41,7 +42,7 @@ __status__ = 'Dev'
 
 # class RGBYieldRegressor(LightningModule):
 class RGBYieldRegressor:
-    def __init__(self, dataloaders, device, lr, momentum, wd, pretrained:bool = True, tune_fc_only:bool = True, model: str = 'densenet'):
+    def __init__(self, dataloaders, device, lr, momentum, wd, pretrained:bool = True, tune_fc_only:bool = True, model: str = 'densenet', training_response_standardizer: dict = None, criterion=None):
         # self.k = k
         self.dataloaders = dataloaders
         self.device = device
@@ -50,12 +51,15 @@ class RGBYieldRegressor:
         self.momentum = momentum
         self.wd = wd
 
+        self.training_response_standardizer = training_response_standardizer
+
         warnings.warn("Params need update: https://blog.ml.cmu.edu/2018/12/12/massively-parallel-hyperparameter-optimization/", FutureWarning)
 
         num_target_classes = 1
-        if self.model_arch == 'resnet50':
+        if self.model_arch == 'resnet18':
             # init a pretrained resnet
-            self.model = models.resnet50(pretrained=pretrained)
+            # self.model = models.resnet50(pretrained=pretrained)
+            self.model = models.resnet18(pretrained=pretrained)
             num_filters = self.model.fc.in_features
             self.model.fc = nn.Sequential(
                 nn.ReLU(inplace=True),
@@ -108,9 +112,17 @@ class RGBYieldRegressor:
 
         if pretrained:
             if tune_fc_only: # option to only tune the fully-connected layers
-                for child in list(self.model.children())[:-1]:
-                    for param in child.parameters():
-                        param.requires_grad = False
+                # for child in list(self.model.children())[:-3]:
+                #     for param in child.parameters():
+                #         param.requires_grad = False
+                if isinstance(self.model, ResNet):
+                    children = [child for child in self.model.children()]
+                    for child in children[:-1]: # freeze all layers up until self.model.fc
+                        for param in child.parameters():
+                            param.requires_grad = False
+
+                if isinstance(self.model, DenseNet):
+                    self.model.features.requires_grad_(False)
                 if self.model_arch == 'short_densenet': # for shorter densenets we need to tune the last batchnorm layer as it has a different size
                     if hasattr(list(list(self.model.children())[0].children())[5], 'weight'):
                         list(list(self.model.children())[0].children())[5].weight.requires_grad = True
@@ -120,12 +132,77 @@ class RGBYieldRegressor:
                            wd=self.wd,
                            scheduler = True
                            )
-        self.set_criterion()
+        if criterion is None:
+            self.set_criterion()
+        else:
+            self.set_criterion(criterion=criterion)
+
+    def print_children_require_grads(self):
+        children = [child for child in self.model.children()]
+        i = 0
+        for child in children:  # freeze all layers up until self.model.fc
+            params = child.parameters()
+            for param in params:
+                print('child_{} grad required: {}'.format(i,param.requires_grad))
+            i+=1
 
     def enable_grads(self):
-        for child in list(self.model.children()):
-            for param in child.parameters():
-                param.requires_grad = True
+        # for child in list(self.model.children()):
+        #     for param in child.parameters():
+        #         param.requires_grad = True
+        if isinstance(self.model, BaselineModel):
+            self.model.blocks['block_0'].requires_grad_(True)
+            self.model.blocks['block_1'].requires_grad_(True)
+            self.model.blocks['block_2'].requires_grad_(True)
+            self.model.blocks['block_3'].requires_grad_(True)
+            self.model.blocks['block_4'].requires_grad_(True)
+            self.model.blocks['block_5'].requires_grad_(True)
+            self.model.blocks['block_6'].requires_grad_(True)
+        elif isinstance(self.model, DenseNet):
+            self.model.features.requires_grad_(True)
+        elif isinstance(self.model, ResNet):
+            for child in self.model.children():  # unfreeze all layers
+                for param in child.parameters():
+                    param.requires_grad = True
+
+
+    def save_SSL_fc_weights(self):
+        if isinstance(self.model, BaselineModel):
+            self.fc_7_weight = self.model.regressor.fc_7.weight
+            self.fc_8_weight = self.model.regressor.fc_8.weight
+            self.fc_9_weight = self.model.regressor.fc_9.weight
+        else:
+            raise NotImplementedError
+
+    def reset_SSL_fc_weights(self):
+        if isinstance(self.model, BaselineModel):
+            self.model.regressor.fc_7.weight = self.fc_7_weight
+            self.model.regressor.fc_8.weight = self.fc_8_weight
+            self.model.regressor.fc_9.weight = self.fc_9_weight
+        else:
+            raise NotImplementedError
+
+    def disable_all_but_fc_grads(self):
+        # for child in list(self.model.children())[:-3]:
+        #     for param in child.parameters():
+        #         param.requires_grad = False
+        if isinstance(self.model, BaselineModel):
+            self.model.blocks['block_0'].requires_grad_(False)
+            self.model.blocks['block_1'].requires_grad_(False)
+            self.model.blocks['block_2'].requires_grad_(False)
+            self.model.blocks['block_3'].requires_grad_(False)
+            self.model.blocks['block_4'].requires_grad_(False)
+            self.model.blocks['block_5'].requires_grad_(False)
+            self.model.blocks['block_6'].requires_grad_(False)
+        elif isinstance(self.model, DenseNet):
+            self.model.features.requires_grad_(False)
+        elif isinstance(self.model, ResNet):
+            for child in self.model.children()[:-1]:  # freeze all layers up until self.model.fc
+                for param in child.parameters():
+                    param.requires_grad = False
+
+    def set_dataloaders(self, dataloaders):
+        self.dataloaders = dataloaders
 
     def set_optimizer(self, lr, momentum, wd, scheduler = True):
         self.optimizer = torch.optim.SGD(params=self.model.parameters(),
@@ -142,8 +219,9 @@ class RGBYieldRegressor:
         else:
             self.scheduler = None
 
-    def set_criterion(self):
-        self.criterion = nn.MSELoss(reduction='mean')
+    # def set_criterion(self, criterion=nn.MSELoss(reduction='mean')):
+    def set_criterion(self, criterion=nn.L1Loss(reduction='mean')):
+        self.criterion = criterion
 
     def train(self):
         '''
@@ -170,10 +248,6 @@ class RGBYieldRegressor:
                 loss = self.criterion(torch.flatten(outputs), labels.data)
                 # accumulate gradients
                 loss.backward()
-                # ######################## DEBUG
-                # for name, param in self.model.named_parameters():
-                #     print(name, param.grad)
-                # ########################
                 # update parameters
                 self.optimizer.step()
                 if self.scheduler is not None:
@@ -185,9 +259,9 @@ class RGBYieldRegressor:
         print('{} Loss: {:.4f}'.format(phase, epoch_loss))
         return epoch_loss
 
-    def test(self, phase:str = 'val'):
+    def test(self, phase:str = 'test'):
         '''
-        1 iteration testing on data set (default: validation set)
+        1 iteration testing on data set (default: test set)
         '''
         running_loss = 0.0
         epoch_loss = 0.0
@@ -195,7 +269,6 @@ class RGBYieldRegressor:
         self.model.to(self.device)
         self.model.eval()  # Set model to evaluate mode
         # Iterate over data.
-        warnings.warn('testing performance on train set, not validation set')
         for inputs, labels in self.dataloaders[phase]:
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
@@ -203,6 +276,10 @@ class RGBYieldRegressor:
                 # make prediction
                 outputs = self.model(inputs)
                 # compute loss
+                # if self.training_response_standardizer is not None:
+                #     loss = self.criterion((torch.flatten(outputs)*self.training_response_standardizer['std'])+self.training_response_standardizer['mean'], labels.data)
+                # else:
+                #     loss = self.criterion(torch.flatten(outputs), labels.data)
                 loss = self.criterion(torch.flatten(outputs), labels.data)
             # statistics
             running_loss += loss.item() * inputs.size(0)
@@ -211,9 +288,9 @@ class RGBYieldRegressor:
         print('{} Loss: {:.4f}'.format(phase, epoch_loss))
         return epoch_loss
 
-    def predict(self, phase:str = 'val'):
+    def predict(self, phase:str = 'test'):
         '''
-        1 iteration prediction on data set (default: validation set)
+        prediction on dataloader[phase: str] (default: test set)
         '''
         self.model.to(self.device)
         self.model.eval()  # Set model to evaluate mode
@@ -227,6 +304,10 @@ class RGBYieldRegressor:
             labels = labels.to(self.device)
             with torch.no_grad():
                 # make prediction
+                # if self.training_response_standardizer is not None:
+                #     y_hat = (torch.flatten(self.model(inputs))*self.training_response_standardizer['std'])+self.training_response_standardizer['mean']
+                #     labels = (labels *self.training_response_standardizer['std'])+self.training_response_standardizer['mean']
+                # else:
                 y_hat = torch.flatten(self.model(inputs))
             local_preds.extend(y_hat.detach().cpu().numpy())
             local_labels.extend(labels.detach().cpu().numpy())
@@ -239,7 +320,7 @@ class RGBYieldRegressor:
         :return:
         '''
         since = time.time()
-        val_mse_history = []
+        test_mse_history = []
         train_mse_history = []
 
         best_model_wts = deepcopy(self.model.state_dict())
@@ -251,13 +332,13 @@ class RGBYieldRegressor:
             if patience > 0:
                 print('Epoch {}/{}'.format(epoch + 1, num_epochs))
                 print('-' * 10)
-                for phase in ['train', 'val']:
+                for phase in ['train', 'test']:
                     if phase == 'train':
                         epoch_loss = self.train()
                         train_mse_history.append(epoch_loss)
-                    if phase == 'val':
+                    if phase == 'test':
                         epoch_loss = self.test()
-                        val_mse_history.append(epoch_loss)
+                        test_mse_history.append(epoch_loss)
 
                         ## first check early stopping
                         # save model with tighter fit
@@ -288,7 +369,7 @@ class RGBYieldRegressor:
         self.optimizer_state_dict = self.optimizer.state_dict()
         # load best model weights
         self.model.load_state_dict(best_model_wts)
-        self.val_mse_history = val_mse_history
+        self.test_mse_history = test_mse_history
         self.train_mse_history = train_mse_history
         self.best_epoch = best_epoch
 
