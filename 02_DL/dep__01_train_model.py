@@ -20,7 +20,7 @@ import pickle
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule
 from RGBYieldRegressor import RGBYieldRegressor
-from MCYieldRegressor import MCYieldRegressor
+from MC_YieldRegressor import MCYieldRegressor
 
 
 
@@ -76,6 +76,7 @@ if __name__ == "__main__":
     ## Patch 73
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_densenet_0307')
     output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB+_densenet_augmented')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented')
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_densenet')
 
     # data_dirs[73] = os.path.join(data_root, 'Patch_ID_73_0307')
@@ -104,6 +105,51 @@ if __name__ == "__main__":
                                                       'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_39.tif']}
     input_files_rgb[39] = {
         'pC_col_2020_plant_PS439_SOats_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_39.tif']}
+
+    ## Patch 119
+    output_dirs[119] = os.path.join(output_root, 'Patch_ID_119_RGB_densenet_augmented')
+    data_dirs[119] = os.path.join(data_root, 'Patch_ID_119')
+
+    input_files_rgb[119] = {'pC_col_2020_plant_PS4119_Lup_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_119.tif']}
+    # input_files_rgb[119] = {'pC_col_2020_plant_PS4119_Lup_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_119.tif',
+    #                                                                       'Tempelberg_sequ_11062020_index_ndvi_aligned_Patch_ID_119.tif',
+    #                                                                       ]}
+
+    ## Patch 50
+    output_dirs[50] = os.path.join(output_root, 'Patch_ID_50_RGB_densenet_augmented')
+    data_dirs[50] = os.path.join(data_root, 'Patch_ID_50')
+
+    input_files_rgb[50] = {'pC_col_2020_plant_PS450_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_50.tif']}
+    # input_files_rgb[50] = {'pC_col_2020_plant_PS450_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_50.tif',
+    #                                                                       'Tempelberg_sequ_16072020_index_ndvi_aligned_Patch_ID_50.tif',
+    #                                                                       ]}
+
+    ## Patch 105
+    output_dirs[105] = os.path.join(output_root, 'Patch_ID_105_RGB_densenet_augmented')
+    data_dirs[105] = os.path.join(data_root, 'Patch_ID_105')
+
+    input_files_rgb[105] = {'pC_col_2020_plant_PS4105_Pha_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_105.tif']}
+    # input_files_rgb[105] = {'pC_col_2020_plant_PS4105_Pha_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_105.tif',
+    #                                                                       'Tempelberg_sequ_11062020_index_ndvi_aligned_Patch_ID_105.tif',
+    #                                                                       ]}
+
+    ## Patch 19
+    output_dirs[19] = os.path.join(output_root, 'Patch_ID_19_RGB_densenet_augmented')
+    data_dirs[19] = os.path.join(data_root, 'Patch_ID_19')
+
+    input_files_rgb[19] = {'pC_col_2020_plant_PS419_Soy_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_19.tif']}
+    # input_files_rgb[19] = {'pC_col_2020_plant_PS419_Soy_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_19.tif',
+    #                                                                       'Tempelberg_sequ_16072020_index_ndvi_aligned_Patch_ID_19.tif',
+    #                                                                       ]}
+
+    ## Patch 95
+    output_dirs[95] = os.path.join(output_root, 'Patch_ID_95_RGB_densenet_augmented')
+    data_dirs[95] = os.path.join(data_root, 'Patch_ID_95')
+
+    input_files_rgb[95] = {'pC_col_2020_plant_PS495_Sun_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_95.tif']}
+    # input_files_rgb[95] = {'pC_col_2020_plant_PS495_Sun_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_95.tif',
+    #                                                                       'Tempelberg_sequ_17062020_index_ndvi_aligned_Patch_ID_95.tif',
+    #                                                                       ]}
 
     # # Test for Lupine
     output_dirs[39] = os.path.join(output_root, 'Lupine')
@@ -140,17 +186,18 @@ if __name__ == "__main__":
                                                      'Tempelberg_sequ_17062020_index_ndvi_aligned_Patch_ID_89.tif',
                                                      'Tempelberg_sequ_17062020_transparent_reflectance_merged_aligned_Patch_ID_89.tif',
                                                      'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_89.tif']}
-    num_folds = 8
-    this_output_dir = output_dirs[73]
 
-    datamodule = PatchCROPDataModule(input_files=input_files_rgb[73], data_dir=data_dirs[73], stride=10, workers=os.cpu_count(), augmented=True)
+    num_folds = 8
+    this_output_dir = output_dirs[95]
+
+    datamodule = PatchCROPDataModule(input_files=input_files_rgb[95], data_dir=data_dirs[95], stride=10, workers=os.cpu_count(), augmented=True)
     datamodule.prepare_data()
 
     # loop over folds, last fold is for testing only
     for k in range(num_folds):
         print(f"STARTING FOLD {k}")
-        # lightningmodule = RGBYieldRegressor(pretrained=True, tune_fc_only=True, model='densenet')
-        lightningmodule = MCYieldRegressor(pretrained=True, tune_fc_only=False, model='densenet')
+        lightningmodule = RGBYieldRegressor(pretrained=True, tune_fc_only=True, model='densenet')
+        # lightningmodule = MCYieldRegressor(pretrained=True, tune_fc_only=False, model='densenet')
         logger = TensorBoardLogger(save_dir=this_output_dir, version=k, name="lightning_logs")
         callbacks = [PrintCallback(),
                      EarlyStopping(monitor="val_loss",

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-script to train the baseline model following (Nevavuori et al.2019) and (Krizhevsky et al.2012)
+script to train model
 """
 
 # Built-in/Generic Imports
@@ -40,6 +40,21 @@ __email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
 __status__ = 'Dev'
 
 
+def compare_models(model_1, model_2):
+    models_differ = 0
+    for key_item_1, key_item_2 in zip(model_1.state_dict().items(), model_2.state_dict().items()):
+        if torch.equal(key_item_1[1], key_item_2[1]):
+            pass
+        else:
+            models_differ += 1
+            if (key_item_1[0] == key_item_2[0]):
+                print('Mismtach found at', key_item_1[0])
+            else:
+                raise Exception
+    if models_differ == 0:
+        print('Models match perfectly! :)')
+
+
 if __name__ == "__main__":
     # seed_everything(42)
     torch.manual_seed(42)
@@ -69,10 +84,10 @@ if __name__ == "__main__":
 
 
     ## Patch 68
-    output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_fixhyperparams')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_tunedhyperparams')
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
+    output_dirs[68] = os.path.join(output_root, 'P_68_ssl')
+    # output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_tunedhyperparams')
 
     data_dirs[68] = os.path.join(data_root, 'Patch_ID_68')
     # data_dirs[73] = os.path.join(data_root, 'Patch_ID_68_NDVI')
@@ -83,17 +98,17 @@ if __name__ == "__main__":
     #                                                                   'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_73.tif']
     #                    }
     input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif']}
-    # input_files_rgb[73] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif',
+    # input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif',
     #                                                                       'Tempelberg_sequ_16072020_index_ndvi_aligned_Patch_ID_68.tif',
     #                                                                       ]}
 
 
     ## Patch 73
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_all_nonspatialCV')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_all')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
-    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_raytuning_nostopping')
-    output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams_all_nonspatialCV')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet3_augmented_fakelabels_fixhyperparams')
+    output_dirs[73] = os.path.join(output_root, 'scv_ssm_scv')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_fakelabels_tunedhyperparams')
 
     data_dirs[73] = os.path.join(data_root, 'Patch_ID_73')
     # data_dirs[73] = os.path.join(data_root, 'Patch_ID_73_NDVI')
@@ -170,55 +185,91 @@ if __name__ == "__main__":
 
     ## HYPERPARAMETERS
     num_epochs = 200
-    num_epochs_finetuning = 10
-    # lr = 0.001 # (Krizhevsky et al.2012)
-    lr = 0.001 # tuning 1
-    lr_finetuning = 0.0005
+    num_epochs_finetuning = 20
+    lr_1 = 1.0880866459321256e-05 # tuning 1
+    lr_2 = 1.2609655679384797e-06  # tuning 2
+    lr_finetuning = 0.00005
     momentum = 0.9 # (Krizhevsky et al.2012)
-    # wd = 0.0005 # (Krizhevsky et al.2012)
-    wd = 0.001 # tuning 1
+    wd_1 = 0.0006426877985686569 # tuning 1
+    wd_2 = 0.0018913189702473687  # tuning 2
     classes = 1
-    batch_size = 128 #(Krizhevsky et al.2012)
+    batch_size_1 = 16
+    batch_size_2 = 8
     # batch_size = 256 # tuning 1
     num_folds = 1#9 # ranom-CV -> 1
     min_delta = 0.01 # aka 1%
     patience = 10
+    patience_fine_tuning = 10
     min_epochs = 200
 
-    patch_no = 73
-    # patch_no = 68
-    stride = 10 # 20 is too small
+    # patch_no = 73
+    patch_no = 68
+    stride = 30 # 20 is too small
     architecture = 'baselinemodel'
     # architecture = 'densenet'
     # architecture = 'resnet50'
     augmentation = True
-    tune_fc_only = False
+    # tune_fc_only = True
     pretrained = False
+    # pretrained = True
     features = 'RGB'
     # features = 'RGB+'
     num_samples_per_fold = None # subsamples? -> None means do not subsample but take whole fold
-    # scv = True
-    scv = False
-    fake_labels = False
-
-    this_output_dir = output_dirs[patch_no]
+    validation_strategy = 'SHOV'
+    # scv = False
+    # training_response_normalization = True
+    training_response_normalization = False
 
     print('Setting up data in {}'.format(data_dirs[patch_no]))
-    datamodule = PatchCROPDataModule(input_files=input_files_rgb[patch_no],
-                                     patch_id=patch_no,
-                                     data_dir=data_dirs[patch_no],
-                                     stride=stride,
-                                     workers=os.cpu_count(),
-                                     augmented=augmentation,
-                                     input_features=features,
-                                     batch_size=batch_size,
-                                     scv=scv,
-                                     fake_labels=fake_labels,
-                                     )
-    datamodule.prepare_data(num_samples=num_samples_per_fold)
+    this_output_dir = output_dirs[patch_no]
+
+    # dictionary for training strategy::
+    # 1) self-supervised pretraining
+    # 2) domain-tuning
+    training_strategy = ['self-supervised','domain-tuning']
+    training_strategy_params = {
+        training_strategy[0]: {
+                'tune_fc_only': False,
+                'fake_labels': True,
+        },
+        training_strategy[1]: {
+            'tune_fc_only': True,
+            'fake_labels': False,
+        }
+    }
+
+    # Current best trial: d9362_00021 with val_loss=25.424242816816534 and parameters={'lr': 0.0001522166684414705, 'wd': 0.0001, 'batch_size': 8}
+
+    ## set up data module for self-supervised pre-training & domain tuning
+
+    datamodule = dict()
+    datamodule['self-supervised'] = PatchCROPDataModule(input_files=input_files_rgb[patch_no],
+                                                        patch_id=patch_no,
+                                                        data_dir=data_dirs[patch_no],
+                                                        stride=stride,
+                                                        workers=os.cpu_count(),
+                                                        augmented=augmentation,
+                                                        input_features=features,
+                                                        batch_size=batch_size_1,
+                                                        validation_strategy=validation_strategy,
+                                                        fake_labels=training_strategy_params['self-supervised']['fake_labels'],
+                                                        )
+    datamodule['self-supervised'].prepare_data(num_samples=num_samples_per_fold)
+    datamodule['domain-tuning'] = PatchCROPDataModule(input_files=input_files_rgb[patch_no],
+                                                      patch_id=patch_no,
+                                                      data_dir=data_dirs[patch_no],
+                                                      stride=stride,
+                                                      workers=os.cpu_count(),
+                                                      augmented=augmentation,
+                                                      input_features=features,
+                                                      batch_size=batch_size_2,
+                                                      validation_strategy=validation_strategy,
+                                                      fake_labels=training_strategy_params['domain-tuning']['fake_labels'],
+                                                      )
+    datamodule['domain-tuning'].prepare_data(num_samples=num_samples_per_fold)
+
 
     print('working on patch {}'.format(patch_no))
-    # loop over folds, last fold is for testing only
 
     # Detect if we have a GPU available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -226,83 +277,129 @@ if __name__ == "__main__":
 
     # ############################### DEBUG
     # warnings.warn('training on 1 fold', FutureWarning)
-    # for k in range(1):
-    for k in range(num_folds):
+    # validation_set_pos= [[0, 0], [1162, 1162]]
+    # validation_set_extend=[[1161, 1161], [1161, 1161]]
+    validation_set_pos = [[1162, 0]]
+    validation_set_extend = [[1161, 2323]]
+    for k in range(1):
+        print('#'*20)
         print(f"STARTING FOLD {k}")
-
-
-        # data
-        datamodule.setup_fold_index(k)
-        dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader()}
-
-        #### TUNE LAST LAYER, FREEZE BEFORE::
-        if features == 'RGB':
-            model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
-                                              device=device,
-                                              lr=lr,
-                                              momentum=momentum,
-                                              wd=wd,
-                                              # k=num_folds,
-                                              pretrained=False,
-                                              tune_fc_only=True,
-                                              model=architecture,
-                                              )
-        elif features == 'RGB+':
-            model_wrapper = MCYieldRegressor(pretrained=True, tune_fc_only=True, model=architecture, lr=lr, wd=wd)
-
-        # Send the model to GPU
-        if torch.cuda.device_count() > 1:
-            model_wrapper.model = nn.DataParallel(model_wrapper.model)
-        model_wrapper.model.to(device)
-
-
-
-        # warnings.warn('training missing', FutureWarning)
-        # Train and evaluate
-        print('training for {} epochs'.format(num_epochs))
-        model_wrapper.train_model(patience=patience,
-                                  min_delta=min_delta,
-                                  num_epochs=num_epochs,
-                                  min_epochs=min_epochs
+        # save training statistics
+        train_loss = dict()
+        val_loss = dict()
+        best_epoch = dict()
+        # 1) self-supervised pretraining, 2) domain-tuning
+        for strategy in training_strategy:
+            print('Training in {}-strategy'.format(strategy))
+            ## SELF-SUPERVISED PRE-TRAINING
+            # sample data in folds & augment and standardize
+            datamodule[strategy].setup_fold(validation_set_pos=validation_set_pos[k],
+                                  validation_set_extend=validation_set_extend[k],
+                                  data_set_row_extend=2323,
+                                  data_set_column_extend=2323,
+                                  buffer = 1,#223,
+                                  training_response_standardization=training_response_normalization
                                   )
-        # best_model, val_losses, train_losses, best_epoch = train_model(model=model_wrapper.model,
-        #                                                                dataloaders=dataloaders_dict,
-        #                                                                criterion=model_wrapper.criterion,
-        #                                                                optimizer=model_wrapper.optimizer,
-        #                                                                delta=0,
-        #                                                                patience=10,
-        #                                                                device=device,
-        #                                                                num_epochs=num_epochs,
-        #                                                                )
-        warnings.warn('fine-tuning missing', FutureWarning)
-        warnings.warn('fine-tuning: optimizer needs state_dict loaded', FutureWarning)
-        # #### Fine-tuning all layers::
-        # model_wrapper.model = best_model
-        # model_wrapper.enable_grads()
-        # model_wrapper.update_criterion(nn.MSELoss(reduction='mean'))
-        # model_wrapper.update_optimizer( lr=lr_finetuning, momentum=momentum, weight_decay=wd)
-        # # Train and evaluate
-        # print('fine-tuning all layers for {} epochs'.format(num_epochs_finetuning))
-        # best_model, ft_val_losses, ft_train_losses, ft_best_epoch = train_model(model=model_wrapper.model,
-        #                                                                dataloaders=dataloaders_dict,
-        #                                                                criterion=model_wrapper.criterion,
-        #                                                                optimizer=model_wrapper.optimizer,
-        #                                                                delta=0,
-        #                                                                patience=5,
-        #                                                                device=device,
-        #                                                                num_epochs=num_epochs_finetuning,
-        #                                                                )
+            dataloaders_dict = {'train': datamodule[strategy].train_dataloader(), 'val': datamodule[strategy].val_dataloader()}
 
+            if strategy == 'self-supervised': # first run?
+                # init model wrapper
+                if features == 'RGB':
+                    model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
+                                                      device=device,
+                                                      lr=lr_1,
+                                                      momentum=momentum,
+                                                      wd=wd_1,
+                                                      # k=num_folds,
+                                                      pretrained=pretrained,
+                                                      tune_fc_only=training_strategy_params['self-supervised']['tune_fc_only'],
+                                                      model=architecture,
+                                                      training_response_standardizer=datamodule[strategy].training_response_standardizer
+                                                      )
+                elif features == 'RGB+':
+                    model_wrapper = MCYieldRegressor(pretrained=True, tune_fc_only=True, model=architecture, lr=lr_1, wd=wd_1)
+                # send model to device
+                # Parallelize model
+                # if torch.cuda.device_count() > 1:
+                #     model_wrapper.model = nn.DataParallel(model_wrapper.model)
+                model_wrapper.model.to(device)
+                # save init weights for fc
+                model_wrapper.save_SSL_fc_weights()
+
+            else: # domain-tuning
+                # update dataloaders
+                model_wrapper.set_dataloaders(dataloaders=dataloaders_dict)
+                # keep model weights -> nothing to do
+                # but reinitialize optimizer
+                model_wrapper.set_optimizer(lr=lr_2,
+                                            momentum=momentum,
+                                            wd=wd_2,
+                                            )
+                # reset fc weights
+                model_wrapper.reset_SSL_fc_weights()
+                # disable all but fc grads
+                model_wrapper.disable_all_but_fc_grads()
+
+            # train model according to a strategy
+            print('training for {} epochs'.format(num_epochs))
+            model_wrapper.train_model(patience=patience,
+                                      min_delta=min_delta,
+                                      num_epochs=num_epochs,
+                                      min_epochs=min_epochs,
+                                      )
+            ###################################
+            # debug step results here
+            local_preds, local_labels = model_wrapper.predict(phase='train')
+            # save labels and predictions for each fold
+            torch.save(local_preds, os.path.join(this_output_dir, 'y_hat_train_'+strategy+'.pt'))
+            torch.save(local_labels, os.path.join(this_output_dir, 'y_train_' + strategy + '.pt'))
+
+            # for debugging, save labels and predictions in df
+            y_yhat_df = pd.DataFrame({'y': local_labels, 'y_hat': local_preds})
+            y_yhat_df.to_csv(os.path.join(this_output_dir, 'y-y_hat_train_{}.csv'.format(strategy)), encoding='utf-8')
+
+            local_preds, local_labels = model_wrapper.predict(phase='val')
+            # save labels and predictions for each fold
+            torch.save(local_preds, os.path.join(this_output_dir, 'y_hat_val_'+strategy+'.pt'))
+            torch.save(local_labels, os.path.join(this_output_dir, 'y_val_' + strategy + '.pt'))
+
+            # for debugging, save labels and predictions in df
+            y_yhat_df = pd.DataFrame({'y': local_labels, 'y_hat': local_preds})
+            y_yhat_df.to_csv(os.path.join(this_output_dir, 'y-y_hat_val_{}.csv'.format(strategy)), encoding='utf-8')
+            ###################################
+
+            # save training statistics
+            train_loss[strategy] = model_wrapper.train_mse_history
+            val_loss[strategy] = model_wrapper.val_mse_history
+            best_epoch[strategy] = model_wrapper.best_epoch
+
+        ## FINE-TUNE ALL LAYERS:
+        # enable gradient computation for all layers
+        model_wrapper.enable_grads()
+        # set hyperparams for optimizer
+        model_wrapper.set_optimizer( lr=lr_2,
+                                     momentum=momentum,
+                                     wd=wd_2,
+                                     )
+        # reinitialize optimizer state
+        model_wrapper.optimizer.load_state_dict(model_wrapper.optimizer_state_dict)
+
+        print('fine-tuning all layers for {} epochs'.format(num_epochs_finetuning))
+        model_wrapper.train_model(patience=patience_fine_tuning,
+                                  min_delta=min_delta,
+                                  num_epochs=num_epochs_finetuning,
+                                  )
 
         # save best model
         torch.save(model_wrapper.model.state_dict(), os.path.join(this_output_dir, 'model_f' + str(k) + '.ckpt'))
         # save training statistics
 
-        df = pd.DataFrame({'train_loss': model_wrapper.train_mse_history,
-                           'val_loss': model_wrapper.val_mse_history,
-                           'best_epoch': model_wrapper.best_epoch,
-                           # 'ft_val_loss':ft_val_losses,
-                           # 'ft_train_loss':ft_train_losses,
-                           # 'ft_best_epoch':ft_best_epoch,
+        df = pd.DataFrame({'ss_train_loss': train_loss['self-supervised'],
+                           'ss_val_loss': val_loss['self-supervised'],
+                           'ss_best_epoch': best_epoch['self-supervised'],
+                           'domain_train_loss': train_loss['domain-tuning'],
+                           'domain_val_loss':val_loss['domain-tuning'],
+                           'domain_best_epoch':best_epoch['domain-tuning'],
                            })
         df.to_csv(os.path.join(this_output_dir, 'training_statistics_f' + str(k) + '.csv'), encoding='utf-8')
+

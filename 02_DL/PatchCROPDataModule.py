@@ -20,42 +20,28 @@ output: Foldername.pt
 
 # Built-in/Generic Imports
 import os
-
-# Libs
-from osgeo import gdal
-from sklearn.model_selection import KFold
-from sklearn.metrics import r2_score
-import numpy as np
-
-import os.path as osp
-from copy import deepcopy
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
-from torch.utils.data import Subset
-
-import torch
-import torchvision.transforms as transforms
-import torchvision.transforms.functional as TF
-from torch.nn import functional as F
-from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.dataset import Dataset, ConcatDataset
-import torch.nn as nn
-import matplotlib.pyplot as plt
+import warnings
 import random
 
+# Libs
+import pandas as pd
+from osgeo import gdal
+import numpy as np
+from typing import Optional
+
+from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
 
-# from pytorch_lightning import LightningDataModule
-# from pytorch_lightning.core.lightning import LightningModule
-# from pytorch_lightning.loops.base import Loop
-# from pytorch_lightning.loops.fit_loop import FitLoop
-# from pytorch_lightning.trainer.states import TrainerFn
-# from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
-# from pytorch_lightning.callbacks import Callback, EarlyStopping
-#
-# from torchmetrics import R2Score
-# from ignite.contrib.metrics.regression import R2Score
-# from ignite.engine import *
+from torch.utils.data import Subset
+import torch
+import torchvision.transforms as transforms
+from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.dataset import Dataset, ConcatDataset, TensorDataset
+
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+from matplotlib import pyplot as plt
 
 # Own modules
 
@@ -80,11 +66,31 @@ __status__ = 'Dev'
 #############################################################################################
 
 
+# class TransformTensorDataset(Dataset):
+#     """TensorDataset with support of transforms.
+#     """
+#     def __init__(self, tensors:tuple, transform=None):
+#         assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+#         self.tensors = tensors
+#         self.transform = transform
+#
+#     def __getitem__(self, index):
+#
+#         x = self.tensors[0][index]
+#
+#         if self.transform:
+#             x = self.transform(image=x)
+#
+#         y = self.tensors[1][index]
+#
+#         return x, y
+#
+#     def __len__(self):
+#         return self.tensors[0].size(0)
 class TransformTensorDataset(Dataset):
     """TensorDataset with support of transforms.
     """
-    def __init__(self, tensors, transform=None):
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+    def __init__(self, tensors:tuple, transform=None):
         self.tensors = tensors
         self.transform = transform
 
@@ -92,14 +98,16 @@ class TransformTensorDataset(Dataset):
         x = self.tensors[0][index]
 
         if self.transform:
-            x = self.transform(x)
+            x = self.transform(image=x)
 
         y = self.tensors[1][index]
 
-        return x, y
+        # return torch.from_numpy(x), torch.from_numpy(y)
+        return x['image'],y
 
     def __len__(self):
-        return self.tensors[0].size(0)
+        # return self.tensors[0].size(0)
+        return len(self.tensors[0])
 
 class PatchCROPDataModule:
 
@@ -107,6 +115,7 @@ class PatchCROPDataModule:
     test_dataset: Optional[Dataset] = None
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
+    test_fold: Optional[Dataset] = None
 
     def __init__(self,
                  input_files: dict,
@@ -117,8 +126,9 @@ class PatchCROPDataModule:
                  workers:int = 0,
                  input_features:str = 'RGB',
                  augmented:bool = False,
-                 scv:bool = True,
-                 fake_labels:bool = True):
+                 validation_strategy:str = 'SCV',
+                 fake_labels:bool = False,
+                 ):
         super().__init__()
         self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
@@ -131,83 +141,43 @@ class PatchCROPDataModule:
         self.workers = workers
         self.augmented = augmented
         self.patch_id = patch_id
-        self.input_features = input_features
-        self.scv = scv
+        self.input_features = input_features # options: a) RGB - red, green, blue; b) GRN - green, red edge, near infrared; c) RGBRN- red, green, blue, red edge, near infrafred
+        self.validation_strategy = validation_strategy
         self.fake_labels = fake_labels
+        self.training_response_standardizer = None
+        self.fold = None
 
         # Datesets
-        if self.scv:
-            self.num_folds = 9
-        else:
-            self.num_folds = 2
-        self.splits = [[] for i in range(self.num_folds)]
-        self.split_idx = [split for split in KFold(self.num_folds).split(range(self.num_folds))]
+        self.data_set = None
         self.setup_done = False
 
-
-        # self.prepare_data_per_node=False
-        # # multi spectral setting
-        # # max and min values for multi spectral bands
-        # self.ms_band_ranges = {'green': (0.53, 0.57),
-        #                        'red': (0.64, 0.68),
-        #                        'nir': (0.77, 0.81),
-        #                        'rededge': (0.73, 0.74),
-        #                        'dsm': (0, 1),
-        #                        'ndvi': (-1, 1)}
-        # self.ms_band_minmax = {'11062020':{'green': (0.53, 0.57),
-        #                                     'red': (0.64, 0.68),
-        #                                     'nir': (0.77, 0.81),
-        #                                     'rededge': (0.73, 0.74)},
-        #                        '16072020':{'green': (0.53, 0.57),
-        #                                     'red': (0.64, 0.68),
-        #                                     'nir': (0.77, 0.81),
-        #                                     'rededge': (0.73, 0.74)},
-        #                        '17062020':{'green': (0.53, 0.57),
-        #                                     'red': (0.64, 0.68),
-        #                                     'nir': (0.77, 0.81),
-        #                                     'rededge': (0.73, 0.74)}}
-        # self.ms_band_order = ['green', 'nir', 'red', 'rededge']
     def prepare_data(self, num_samples:int = None) -> None: # would actually make more sense to put it to setup, but there it is called as several processes
         # load the data
         # normalize
         # split
         # oversample
-        # load over feature label combinations
-        # if self.augmented:
-        #     kfold_dir = os.path.join(self.data_dir,'kfold_set_augmented')
-        # else:
-        #     kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+        # load feature label combinations
+
         if self.fake_labels:
-            if self.scv:
-                kfold_dir = os.path.join(self.data_dir, 'kfold_set_fakelabels')
-            else:
-                kfold_dir = os.path.join(self.data_dir, 'kfold_set_nonspatial_fakelabels')
+            kfold_dir = os.path.join(self.data_dir, 'kfold_set_fakelabels_s{}'.format(self.stride))
         else:
-            if self.scv:
-                kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels')
-            else:
-                kfold_dir = os.path.join(self.data_dir, 'kfold_set_nonspatial_origlabels')
+            kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels_s{}'.format(self.stride))
+
         if not self.setup_done:
             # check if already build and load
             if os.path.isdir(kfold_dir):
-                # load
+                # load raw remote sensing images
                 print('loading data')
-                for k in range(self.num_folds):
-                    if self.input_features == "RGB":
-                        file_name = 'Patch_ID_' + str(self.patch_id) + '_fold_' + str(k) + '.pt'
-                    elif self.input_features == "RGB+":
-                        file_name = 'Patch_ID_' + str(self.patch_id) + '_NDVI_fold_' + str(k) + '.pt'
-                    elif self.input_features == "MSI":
-                        file_name = 'Patch_ID_' + str(self.patch_id) + '_MSI_fold_' + str(k) + '.pt'
+                if self.input_features == "RGB":
+                    file_name = 'Patch_ID_' + str(self.patch_id) + '.pt'
+                elif self.input_features == "GRN":
+                    file_name = 'Patch_ID_' + str(self.patch_id) + '_GRN.pt'
+                elif self.input_features == "RGBRN":
+                    file_name = 'Patch_ID_' + str(self.patch_id) + '_RGBRN.pt'
 
-                    # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
-                    f = torch.load(os.path.join(kfold_dir, file_name))
-                    self.splits[int(k)] = f
-                # for file in os.listdir(kfold_dir):
-                #     k = file.split('.')[0][-1]
-                #     # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
-                #     f = torch.load(os.path.join(kfold_dir, file))
-                #     self.splits[int(k)] = f
+                # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
+                f = torch.load(os.path.join(kfold_dir, file_name))
+                self.data_set = f
             else:
                 # otherwise build oversampled k-fold set
                 print('generating data')
@@ -223,233 +193,284 @@ class PatchCROPDataModule:
                         if 'soda' in feature or 'Soda' in feature: # RGB
                             print(feature)
                             f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3,:,:], dtype=torch.float) # only first 3 channels -> not alpha channel
+                            # f = gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3, :,:]  # only first 3 channels -> not alpha channel
                         else: # multichannel
                             f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray(), dtype=torch.float)
+                            # f = gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()
                         # concat feature tensor, e.g. RGB tensor and NDVI tensor
                         if f.dim() == 2:
                             feature_matrix = torch.cat((feature_matrix, f.unsqueeze(0)), 0)
                         else:
                             feature_matrix = torch.cat((feature_matrix, f), 0)
+                    # sliding window  -> n samples of 224x224 images
+                    self.generate_sliding_window_augmented_ds(label_matrix, feature_matrix)
 
-                    # spatial splits for k fold spatial cross validation and call sliding window  -> 224x224 images
-                    self.setup_folds(label_matrix, feature_matrix)
-                self.splits = [ConcatDataset(ensemble) for ensemble in self.splits]
-                # save splits
+                # save data_set
                 os.mkdir(kfold_dir)
-                for idx in range(self.num_folds):
-                    file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'_fold_'+str(idx)+'.pt'
-                    torch.save(self.splits[idx], file_name)
+                file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'.pt'
+                torch.save(self.data_set, file_name)
             self.setup_done = True
-        if num_samples != None:
-            idx = random.sample(range(3025), num_samples)
-            self.splits = [Subset(split, idx) for split in self.splits]
-            for idx in range(self.num_folds):
-                    file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'_subsample_'+str(num_samples)+'_fold_'+str(idx)+'.pt'
-                    torch.save(self.splits[idx], file_name)
 
-    def load_subsamples(self, num_samples:int=None):
-        if num_samples != None:
-            kfold_dir = os.path.join(self.data_dir, 'kfold_set')
-            # check if already build and load
-            if os.path.isdir(kfold_dir):
-                # load
-                for k in range(self.num_folds):
-                    file_name = 'Patch_ID_'+str(self.patch_id)+'_subsample_'+str(num_samples)+'_fold_'+str(k)+'.pt'
-                    # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
-                    f = torch.load(os.path.join(kfold_dir, file_name))
-                    self.splits[int(k)] = f
-        else:
-            raise ValueError('number of samples need to be > 1.')
+    #     if num_samples != None:
+    #         idx = random.sample(range(3025), num_samples)
+    #         self.splits = [Subset(split, idx) for split in self.splits]
+    #         for idx in range(self.num_folds):
+    #                 file_name = kfold_dir+'/'+self.data_dir.split('/')[-1]+'_subsample_'+str(num_samples)+'_fold_'+str(idx)+'.pt'
+    #                 torch.save(self.splits[idx], file_name)
+    #
+    # def load_subsamples(self, num_samples:int=None):
+    #     if num_samples != None:
+    #         kfold_dir = os.path.join(self.data_dir, 'kfold_set')
+    #         # check if already build and load
+    #         if os.path.isdir(kfold_dir):
+    #             # load
+    #             for k in range(self.num_folds):
+    #                 file_name = 'Patch_ID_'+str(self.patch_id)+'_subsample_'+str(num_samples)+'_fold_'+str(k)+'.pt'
+    #                 # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
+    #                 f = torch.load(os.path.join(kfold_dir, file_name))
+    #                 self.splits[int(k)] = f
+    #     else:
+    #         raise ValueError('number of samples need to be > 1.')
 
-    def setup_folds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224) -> None:
+    def generate_sliding_window_augmented_ds(self, label_matrix, feature_matrix, lower_bound: int =327, kernel_size: int =224) -> None:
         '''
         :param label_matrix: kriging interpolated yield maps
         :param feature_matrix: stack of feature maps, such as rgb remote sensing, multi-channel remote sensing or dsm or ndvi
         both are required to have same dimension, but have different size according to whether the patch is a flower strip
         or not
-        :return: constructs self.splits containing images (C H W) but in range [0 ... 255]
-        whereas RGB format would be (H W C) range [0 ... 255]
-        pytorch pretraining exptexted (C H W) [0...1]
+        :return: None
+        generate sliding window samples over whole patch and save as self.data_set
         '''
-
-        if self.scv: # Spatial Cross Validation
-            fold_starts_x = [0, 774, 1548]
-            fold_length_x = 774
-            if feature_matrix.shape[1] == 2977: # -> no flower strip patch
-                fold_starts_y = [0, 774, 1548]
-                fold_length_y = 774
-            else: # flower strip patch
-                fold_starts_y = [0, 645, 1290]
-                fold_length_y = 645
-
-            # ############### DEBUG INSERT
-            # fold_starts_x = [0, 0, 0]
-            # fold_starts_y = [0, 0, 0]
-            # ###############
-        else:# One block for non-spatial cross validation
-            fold_starts_x = [0, ]
-            fold_starts_y = [0, ]
-            fold_length_x = 2322
-            if feature_matrix.shape[1] == 2977: # -> no flower strip patch
-                fold_length_y = 2322
-            else: # flower strip patch
-                fold_length_y = 1935
-
+        # length= 2322/1935
+        
         upper_bound_x = feature_matrix.shape[2] - lower_bound
         upper_bound_y = feature_matrix.shape[1] - lower_bound
 
         # clip to tightest inner rectangle
-        # and normalize feature array to range [0,1]
-        # this could be outsourced to transforms.toTensor(), however this would require the input to be a PIL image
         feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
 
-        # normalize non-rgb channels to a range [0...255]
-        # s.t. they can later be transformed to work with pre-training initialized weights
-        if self.input_features == 'RGB' or self.input_features == 'RGB+':
-            feature_arr[:3, :, :] = (feature_arr[:3, :, :] ) / 255
-        if self.input_features == 'RGB+':
-            # raise NotImplementedError('NDVI support for multi-modal multi-source input not yet supported')
-            if feature_arr.shape[0] > 3: # normalize rest of channels, i.e. NDVI
-                    # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-                    # feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
-                    # feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
-                    # feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
-                    # feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
+        # scale to 0...1
+        if self.input_features == 'RGB':
+            # feature_arr = feature_arr / 255 # --> deprecated, normalization is now done in setup_fold()->transformer
+            pass
+        elif self.input_features == 'GRN':
+            c1_min = feature_arr[0,:,:].min()
+            c2_min = feature_arr[1, :, :].min()
+            c3_min = feature_arr[2, :, :].min()
+            c1_max = feature_arr[0, :, :].max()
+            c2_max = feature_arr[1, :, :].max()
+            c3_max = feature_arr[2, :, :].max()
 
-                    feature_arr[3, :, :] = (feature_arr[3, :, :] + 1) / 2
-            else:
-                raise ValueError("No NDVI channel found")
-        elif self.input_features == 'MSI':
-            # raise NotImplementedError("torch version, NumPy missing")
-            ##### torch version
-            feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-            feature_arr_min = feature_arr.view(feature_arr.size(0),-1).min(1,keepdim=True)[0] # get channel-wise min
-            feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
-            feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
-            feature_arr /= feature_arr_max.unsqueeze(1)
+            feature_arr[0, :, :] = ((feature_arr[0, :, :] - c1_min) / c1_max)*255 # normalization to [0..1] *255 to first get it to RGB range, second use normalization is now done in setup_fold()->transformer
+            feature_arr[1, :, :] = ((feature_arr[1, :, :] - c2_min) / c2_max)*255
+            feature_arr[2, :, :] = ((feature_arr[2, :, :] - c3_min) / c3_max)*255
+        elif self.input_features == 'RGBRN':
+            c4_min = feature_arr[3, :, :].min()
+            c5_min = feature_arr[4, :, :].min()
+            c4_max = feature_arr[3, :, :].max()
+            c5_max = feature_arr[4, :, :].max()
 
-        ########  --> transforms ----> NOPEEEEEEE, otherwise one hell of type conversion messes
-        # if feature_RGB:
-        #     feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-        #     feature_arr[:3, :, :] /= 255 # normalzie RGB channels
-        #     if feature_arr.shape[0] > 3: # normalize rest of channels, i.e. NDVI
-        #         # feature_arr[3:, :, :] = feature_matrix[3:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-        #         feature_arr_min = (feature_arr.min(1, keepdim=True)[0]).min(2, keepdim=True)[0]
-        #         feature_arr_max = (feature_arr.max(1, keepdim=True)[0]).max(2, keepdim=True)[0]
-        #         feature_arr[3, :, :] -= torch.flatten(feature_arr_min)[3:]
-        #         feature_arr[3, :, :] /= (torch.flatten(feature_arr_max)[3:]-torch.flatten(feature_arr_min)[3:])
-        #         # feature_arr_min = feature_arr.view(feature_arr.size(0), -1).min(1, keepdim=True)[0]  # get channel-wise min
-        #         # feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0]  # get channel-wise max
-        #         # feature_arr[3:, :, :] -= feature_arr_min.unsqueeze(1)  # channel-wise substraction
-        #         # feature_arr[3:, :, :] /= feature_arr_max.unsqueeze(1)
-        # else:
-        #     feature_arr = feature_matrix[:, lower_bound:upper_bound_y, lower_bound:upper_bound_x]
-        #     feature_arr_min = feature_arr.view(feature_arr.size(0),-1).min(1,keepdim=True)[0] # get channel-wise min
-        #     feature_arr_max = feature_arr.view(feature_arr.size(0), -1).max(1, keepdim=True)[0] # get channel-wise max
-        #     feature_arr -= feature_arr_min.unsqueeze(1) # channel-wise substraction
-        #     feature_arr /= feature_arr_max.unsqueeze(1)
-
+            feature_arr[3, :, :] = ((feature_arr[3, :, :] - c4_min) / c4_max) * 255  # normalization to [0..1] *255 to first get it to RGB range, second use normalization is now done in setup_fold()->transformer
+            feature_arr[4, :, :] = ((feature_arr[4, :, :] - c5_min) / c5_max) * 255
 
         if self.fake_labels:
             label_arr = (feature_arr[0,:,:] + feature_arr[1,:,:] + feature_arr[2,:,:])/3
         else:
             label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
+        # set sizes
+        self.data_set_row_extend = feature_arr.shape[2]
+        self.data_set_column_extend = feature_arr.shape[1]
 
-        counter = 0
-        for fold_x in fold_starts_x:
-            for fold_y in fold_starts_y:
-                print('fold: {}, x: {}, y: {}'.format(counter, fold_x, fold_y))
+        # calculating start positions of kernels
+        # x and y are need to able to take different values, as patches with flowerstrips are smaller
+        x_size = feature_arr.shape[2]
+        y_size = feature_arr.shape[1]
+        possible_shifts_x = int((x_size - kernel_size) / self.stride)
+        x_starts = np.array(list(range(possible_shifts_x))) * self.stride
+        possible_shifts_y = int((y_size - kernel_size) / self.stride)
+        y_starts = np.array(list(range(possible_shifts_y))) * self.stride
 
-                feature_fold_arr = feature_arr[:, fold_y:fold_y + fold_length_y, fold_x:fold_x + fold_length_x]
-                label_fold_arr = label_arr[fold_y:fold_y + fold_length_y, fold_x:fold_x + fold_length_x]
+        # loop over start postitions and save kernel as separate image
+        feature_kernel_tensor = None
+        label_kernel_tensor = None
+        for y in y_starts:
+            print('y: {}'.format(y))
+            if y == y_starts[int(len(y_starts) / 4)]:
+                print("........... 25%")
+            if y == y_starts[int(len(y_starts) / 2)]:
+                print("........... 50%")
+            if y == y_starts[int(len(y_starts) * 3 / 4)]:
+                print("........... 75%")
+            for x in x_starts:
+                # shift kernel over image and extract kernel part
+                # only take RGB value
+                feature_kernel_img = feature_arr[:, y:y + kernel_size, x:x + kernel_size]
+                label_kernel_img = label_arr[y:y + kernel_size, x:x + kernel_size]
+                if x==0 and y==0:
+                    feature_kernel_tensor = feature_kernel_img.unsqueeze(0)
+                    label_kernel_tensor = label_kernel_img.mean().unsqueeze(0)
+                else:
+                    feature_kernel_tensor = torch.cat((feature_kernel_tensor,feature_kernel_img.unsqueeze(0)), 0)
+                    label_kernel_tensor = torch.cat((label_kernel_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
+        self.data_set = (feature_kernel_tensor, label_kernel_tensor)
 
-                # calculating start positions of kernels
-                # x and y are need to able to take different values, as patches with flowerstrips are smaller
-                x_size = feature_fold_arr.shape[2]
-                y_size = feature_fold_arr.shape[1]
-                possible_shifts_x = int((x_size - kernel_size) / self.stride)
-                x_starts = np.array(list(range(possible_shifts_x))) * self.stride
-                possible_shifts_y = int((y_size - kernel_size) / self.stride)
-                y_starts = np.array(list(range(possible_shifts_y))) * self.stride
-
-                # loop over start postitions and save kernel as separate image
-                feature_tensor = None
-                label_tensor = None
-                for y in y_starts:
-                    print('y: {}'.format(y))
-                    if y == y_starts[int(len(y_starts) / 4)]:
-                        print("........... 25%")
-                    if y == y_starts[int(len(y_starts) / 2)]:
-                        print("........... 50%")
-                    if y == y_starts[int(len(y_starts) * 3 / 4)]:
-                        print("........... 75%")
-                    for x in x_starts:
-                        # shift kernel over image and extract kernel part
-                        # only take RGB value
-                        feature_kernel_img = feature_fold_arr[:, y:y + kernel_size, x:x + kernel_size]
-                        label_kernel_img = label_fold_arr[y:y + kernel_size, x:x + kernel_size]
-                        if x==0 and y==0:
-                            feature_tensor = feature_kernel_img.unsqueeze(0)
-                            label_tensor = label_kernel_img.mean().unsqueeze(0)
-                        else:
-                            feature_tensor = torch.cat((feature_tensor,feature_kernel_img.unsqueeze(0)), 0)
-                            label_tensor = torch.cat((label_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
-                if self.scv:
-                    # label_tensor = label_tensor.type(torch.HalfTensor) # HalfTensor is only CPU Type
-                    # feature_tensor = feature_tensor.type(torch.HalfTensor)
-                    self.splits[counter].append((feature_tensor,label_tensor))
-                    counter += 1
-                else: # create foldsfor non-spatial random CV
-                    non_spatial_cv_split_idxs = train_test_split(np.arange(len(feature_tensor)))
-                    # append train set
-                    self.splits[counter].append((feature_tensor[non_spatial_cv_split_idxs[0], :, :, :], label_tensor[non_spatial_cv_split_idxs[0]]))
-                    # append test set
-                    counter += 1
-                    self.splits[counter].append((feature_tensor[non_spatial_cv_split_idxs[1], :, :, :], label_tensor[non_spatial_cv_split_idxs[1]]))
-
-
-    def setup_fold_index(self, fold_index: int) -> None:
+    def setup_fold(self, fold: int = 0, training_response_standardization: bool = True, repeat_trainset_ntimes:int = 1) -> None:
         '''
-        Sets up validation and train data set and applies normalization for both and augmentations for the train set if
-        self.augmented.
-        :param fold_index: index of the validation set, folds with i != fold_index are combined to train set
+        Set up validation and train data set using self.data_set and apply normalization for both and augmentations for the train set if
+        self.augmented. Overlap samples between train and test set are discarded.
+
         :return: None
         '''
-        # get indices
-        if self.scv:
-            train_indices, val_indices = self.split_idx[fold_index]
+
+        print('\tSetting up fold specific datasets...')
+
+        self.fold=fold
+        val_set = None
+        train_set = None
+        test_set = None
+
+        # Splitting into datasets according to validation strategy
+        # Part 1) Compute subset indexes
+        if self.validation_strategy == 'SCV': # spatial cross valiation
+            if self.stride == 10: # for stride = 10
+                items_per_row = 209
+                buffer_to = 94
+                buffer_from = 116
+            elif self.stride == 30:
+                items_per_row = 69
+                buffer_to = 31
+                buffer_from = 39
+            x_def = y_def = np.arange(items_per_row)
+
+            # ranges for x and y
+            # quadrants:
+            # 0 1
+            # 2 3
+            # test val train   | fold
+            #  0    1   {2,3}  |  0
+            #  1    3   {0,2}  |  1
+            #  3    2   {0,1}  |  2
+            #  2    0   {1,3}  |  3
+
+            test_range = [(np.arange(buffer_to), np.arange(buffer_to)), # quadrant 0
+                          (np.arange(buffer_from, items_per_row), np.arange(buffer_to)), # quadrant 1
+                          (np.arange(buffer_from, items_per_row), np.arange(buffer_from, items_per_row)), # quadrant 3
+                          (np.arange(buffer_to), np.arange(buffer_from, items_per_row)), # quadrant 2
+                          ]
+            val_range = [(np.arange(buffer_from, items_per_row), np.arange(buffer_to)), # quadrant 1
+                         (np.arange(buffer_from, items_per_row), np.arange(buffer_from, items_per_row)), # quadrant 3
+                         (np.arange(buffer_to), np.arange(buffer_from, items_per_row)), # quadrant 2
+                         (np.arange(buffer_to), np.arange(buffer_to)), # quadrant 0
+                         ]
+            train_range = [(np.arange(items_per_row), np.arange(buffer_from, items_per_row)),
+                           (np.arange(buffer_to), np.arange(items_per_row)),
+                           (np.arange(items_per_row), np.arange(buffer_to)),
+                           (np.arange(buffer_from, items_per_row), np.arange(items_per_row)),
+                           ]
+
+            test_idxs = []
+            val_idxs = []
+            train_idxs = []
+
+            for y in y_def:
+                for x in x_def:
+                    idx = (x + y * items_per_row)
+                    if x in test_range[fold][0] and y in test_range[fold][1]:
+                        test_idxs.append(idx)
+                    elif x in val_range[fold][0] and y in val_range[fold][1]:
+                        val_idxs.append(idx)
+                    elif x in train_range[fold][0] and y in train_range[fold][1]:
+                        train_idxs.append(idx)
+
+        elif self.validation_strategy == 'SHOV': #spatial hold out validation
+            # train_idxs = np.arange(0,61)
+            # val_idxs = np.arange(61, 81)
+            # train_idxs = np.arange(0, 234)
+            # val_idxs = np.arange(252, 324)
+            # train_idxs = np.arange(0, 989)
+            # val_idxs = np.arange(1027, 1369)
+            # stride 30
+            train_idxs = np.arange(0, 3294)
+            val_idxs = np.arange(3847, 4761)
+        elif self.validation_strategy == 'RCV': # random CV
+            non_spatial_cv_split_idxs = train_test_split(np.arange(len(self.data_set[0])))
+            train_idxs = non_spatial_cv_split_idxs[0]
+            val_idxs = non_spatial_cv_split_idxs[1]
+
+
+        # subset the dataset into train_set, test_set and val_set
+        if training_response_standardization:
+            # standardize response variables according to mean and std of train set
+            self.training_response_standardizer = {'mean': torch.mean(self.data_set[1][train_idxs]),
+                                                      'std': torch.std(self.data_set[1][train_idxs]),
+                                                   }
+            # print(self.training_response_standardizer)
+            train_set = (self.data_set[0][train_idxs, :, :, :].repeat(repeat_trainset_ntimes, 1, 1, 1),
+                         (self.data_set[1][train_idxs].repeat(repeat_trainset_ntimes) - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
+            val_set = (self.data_set[0][val_idxs, :, :, :],
+                       (self.data_set[1][val_idxs] - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
+            if self.validation_strategy == 'SCV':
+                test_set = (self.data_set[0][test_idxs, :, :, :],
+                           (self.data_set[1][test_idxs] - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
         else:
-            val_indices, train_indices = self.split_idx[fold_index]
+            train_set = (self.data_set[0][train_idxs, :, :, :].repeat(repeat_trainset_ntimes, 1, 1, 1), self.data_set[1][train_idxs].repeat(repeat_trainset_ntimes))
+            val_set = (self.data_set[0][val_idxs, :, :, :], self.data_set[1][val_idxs])
+            if self.validation_strategy == 'SCV':
+                test_set = (self.data_set[0][test_idxs, :, :, :], self.data_set[1][test_idxs])
 
         if self.input_features == 'RGB':
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                             std=[0.229, 0.224, 0.225])
-        elif self.input_features == 'RGB+':
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406, 0],
-                                             std=[0.229, 0.224, 0.225, 1])
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+        elif self.input_features == 'GRN':
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+            warnings.warn('Channel normalization for GRN most likely different from RGB')
+        elif self.input_features == 'RGBRN':
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406, 0, 0],
+                                    std=[0.229, 0.224, 0.225, 1, 1])
+            raise NotImplemented("Channel normalization not implemented for RGBRN")
 
+        testset_transformer = A.Compose([ #assumption by albumentations: image is in HWC
+            self.normalize,
+            ToTensorV2(), # convert to CHW
+        ])
 
-        # set up train and validation data set and apply respective transformations and/or augmentations
-        # given by pytorch and ImageNet pretraining
-        transformer = transforms.Compose([#transforms.ToPILImage(),
-                                          #transforms.ToTensor(),
-                                          normalize,
-                                          ])
+        # type cast to numpy again for compatibility with albumentations\
+        # val_set = (val_set[0].moveaxis(1,3).numpy(), val_set[1].numpy())
+        # test_set = (test_set[0].moveaxis(1,3).numpy(), test_set[1].numpy())
+        val_set = (val_set[0].movedim(1, 3).numpy(), val_set[1].numpy())
+        test_set = (test_set[0].movedim(1, 3).numpy(), test_set[1].numpy())
 
-        self.val_fold = ConcatDataset([TransformTensorDataset(self.splits[i],transform=transformer) for i in val_indices])
+        self.val_fold = TransformTensorDataset(val_set, transform=testset_transformer)
+        if self.validation_strategy == 'SCV':
+            self.test_fold = TransformTensorDataset(test_set, transform=testset_transformer)
 
-        # only train set would be augmented if enabled
+        # only train set is augmented if enabled
         if self.augmented:
-            transformer = transforms.Compose([#transforms.ToPILImage(),
-                                              #transforms.ToTensor(),
-                                              normalize,
-                                              transforms.RandomHorizontalFlip(),
-                                              transforms.RandomVerticalFlip(),
-                                              ])
+            trainset_transformer = A.Compose([  # transforms.ToPILImage(),
+                self.normalize,
+                # A.Blur(),
+                # A.CLAHE(),
+                A.RandomBrightnessContrast(),
+                A.RandomRotate90(),
+                A.VerticalFlip(),
+                A.HorizontalFlip(),
+                A.Transpose(),
+                ToTensorV2(),
+            ])
+        else:
+            trainset_transformer = A.Compose([  # transforms.ToPILImage(),
+                self.normalize,
+                ToTensorV2(),
+            ])
+        # type cast to numpy again for compatibility with albumentations\
+        # train_set = (train_set[0].moveaxis(1, 3).numpy(), train_set[1].numpy())
+        train_set = (train_set[0].movedim(1, 3).numpy(), train_set[1].numpy())
+        self.train_fold = TransformTensorDataset(train_set, transform=trainset_transformer)
+        print('\tSet up done...')
 
-        self.train_fold = ConcatDataset([TransformTensorDataset(self.splits[i], transform=transformer) for i in train_indices])
-
-
+    def set_batch_size(self, batch_size: int):
+        self.batch_size = batch_size
 
     def train_dataloader(self) -> DataLoader:
         print('loading training set with {} samples'.format(len(self.train_fold)))
@@ -460,185 +481,88 @@ class PatchCROPDataModule:
         print('loading validation set with {} samples'.format(len(self.val_fold)))
         return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
 
-    # def test_dataloader(self) -> DataLoader:
-    #     # transformer = transforms.Compose([transforms.ToTensor()])
-    #     # return transformer(DataLoader(self.test_dataset))
-    #     return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
+    def test_dataloader(self) -> DataLoader:
+        print('loading validation set with {} samples'.format(len(self.test_fold)))
+        return DataLoader(self.test_fold, num_workers=self.workers, batch_size=self.batch_size)
+
+    def all_dataloader(self) -> DataLoader:
+        print('loading whole patch data set with {} samples'.format(len(self.data_set)))
+        transformer = A.Compose([self.normalize,
+                                 ToTensorV2(),
+                                          ])
+
+        whole_ds = TransformTensorDataset(self.data_set, transform=transformer)
+
+        return DataLoader(whole_ds, num_workers=self.workers, batch_size=self.batch_size)
 
     # def predict_dataloader(self) -> DataLoader:
     #     # transformer = transforms.Compose([transforms.ToTensor()])
     #     # return transformer(DataLoader(self.test_dataset))
     #     return DataLoader(self.test_dataset, num_workers=self.workers, batch_size=self.batch_size)
 
+    def create_debug_samples(self, n=20):
+        '''
+        Save n samples from each data set to folder, for purposes of testing if augmentations are correctly applied
+        :param n: number of samples saved to self.data_dir/Test_Figs for train/val/test set
+        :return:
+        '''
+        # create folders
+        dir = os.path.join(self.data_dir, 'Test_Figs')
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+
+        # load dataset loaders with batch_size = 1
+        orig_bs = self.batch_size
+        self.batch_size = 1
+        dataloaders = {'train': self.train_dataloader(), 'val': self.val_dataloader(), 'test': self.test_dataloader()}
+
+        for phase in ['train', 'val', 'test']:
+            print('\tSaving Debug Figures for {}'.format(phase))
+            i = 0
+            c1 = None
+            c2 = None
+            c3 = None
+            if self.input_features == 'RGBRN':
+                c4 = None
+                c5 = None
+            response = None
+            for inputs, labels in dataloaders[phase]:
+                # save distribution plot
+                # if c1 is None:
+                #     c1 = inputs.squeeze()[0].flatten().numpy()
+                #     c2 = inputs.squeeze()[1].flatten().numpy()
+                #     c3 = inputs.squeeze()[2].flatten().numpy()
+                #     response = labels.squeeze().repeat(len(c1))
+                #     if self.input_features == 'RGBRN':
+                #         c4 = inputs.squeeze()[3].squeeze()
+                #         c5 = inputs.squeeze()[4].squeeze()
+                # else:
+                #     c1 = np.concatenate([c1, inputs.squeeze()[0].flatten().numpy()])
+                #     c2 = np.concatenate([c2, inputs.squeeze()[1].flatten().numpy()])
+                #     c3 = np.concatenate([c3, inputs.squeeze()[2].flatten().numpy()])
+                #     response = np.concatenate([response, labels.squeeze().repeat(len(c1))])
+                #     if self.input_features=='RGBRN':
+                #         c4 = np.concatenate([c4, inputs.squeeze()[3].squeeze()])
+                #         c5 = np.concatenate([c5, inputs.squeeze()[4].squeeze()])
+
+                # save sample figures
+                if i<n:
+                    plt.imshow(inputs.squeeze().movedim(0, 2).numpy())
+                    plt.savefig(os.path.join(dir, 'fold{}_{}_{}_{}.png'.format(self.fold,phase,i,str(labels.squeeze().item())[:5])))
+                    i += 1
+                # if i >= n: break
+            # if self.input_features=='RGB':
+            #     df = pd.DataFrame(data={'R':c1,
+            #                             'G':c2,
+            #                             'B':c3,
+            #                             'Yield':response})
+            # elif self.input_features=='GRN':
+            #     df = pd.DataFrame(columns=['G', 'RE', 'NIR', 'Yield'])
+            # elif self.input_features=='RGBRN':
+            #     df = pd.DataFrame(columns=['R','G','B', 'RE', 'NIR', 'Yield'])
+
+        self.batch_size = orig_bs
+
     def __post_init__(cls):
         super().__init__()
 
-
-
-#############################################################################################
-#                           Step 3 / 5: Implement the EnsembleVotingModel module            #
-# The `EnsembleVotingModel` will take our custom LightningModule and                        #
-# several checkpoint_paths.                                                                 #
-#                                                                                           #
-#############################################################################################
-
-
-# class SpatialCVModel(LightningModule):
-#     def __init__(self, model_cls: Type[LightningModule], checkpoint_paths: List[str]) -> None:
-#         super().__init__()
-#         # Create `num_folds` models with their associated fold weights
-#         self.models = torch.nn.ModuleList([model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
-#         # self.predictions = torch.tensor([])
-#         # self.y = torch.tensor([])
-#         self.global_r2 = R2Score()
-#         self.local_r2 = [R2Score() for i in range(8)]
-#
-#     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
-#         # Compute predictions over the `num_folds` models.
-#         # report global and local r2 score
-#         y = batch[1]
-#         y_hat = torch.stack([m(batch[0]) for m in self.models])
-#
-#         # self.log("y is cuda", y.is_cuda, logger=True)
-#         # self.log("y_hat is cuda", y_hat[0,:].squeeze().is_cuda, logger=True)
-#
-#         # y = y.to(device=self.device)
-#         # y_hat = y_hat.to(device=self.device)
-#
-#         # print("{}, {}".format(y_hat[1,:].squeeze().shape, y_hat.shape))
-#         for i in range(8):
-#             this_y_hat = y_hat[i,:].squeeze()
-#             # print(y.is_cuda)
-#             # print(this_y_hat.is_cuda)
-#             self.local_r2[i].update(this_y_hat, y)
-#             self.log("local R2 - M{}".format(i), self.local_r2[i].compute(), prog_bar=True, logger=True)
-#
-#         self.global_r2.update(y_hat.flatten(), y.repeat(8))
-#         self.log("global R2", self.global_r2.compute(), prog_bar=True, logger=True)
-#
-
-#############################################################################################
-#                           Step 4 / 5: Implement the  KFoldLoop                            #
-# From Lightning v1.5, it is possible to implement your own loop. There is several steps    #
-# to do so which are described in detail within the documentation                           #
-# https://pytorch-lightning.readthedocs.io/en/latest/extensions/loops.html.                 #
-# Here, we will implement an outer fit_loop. It means we will implement subclass the        #
-# base Loop and wrap the current trainer `fit_loop`.                                        #
-#############################################################################################
-
-
-#############################################################################################
-#                     Here is the `Pseudo Code` for the base Loop.                          #
-# class Loop:                                                                               #
-#                                                                                           #
-#   def run(self, ...):                                                                     #
-#       self.reset(...)                                                                     #
-#       self.on_run_start(...)                                                              #
-#                                                                                           #
-#        while not self.done:                                                               #
-#            self.on_advance_start(...)                                                     #
-#            self.advance(...)                                                              #
-#            self.on_advance_end(...)                                                       #
-#                                                                                           #
-#        return self.on_run_end(...)                                                        #
-#############################################################################################
-#
-# class PrintCallback(Callback):
-#     def on_train_start(self, trainer, pl_module):
-#         print("Training is started!")
-#     def on_train_end(self, trainer, pl_module):
-#         print("Training is done.")
-#
-#
-# class KFoldLoop(Loop):
-#     def __init__(self, num_folds: int, export_path: str) -> None:
-#         super().__init__()
-#         self.num_folds = num_folds
-#         self.current_fold: int = 0
-#         self.export_path = export_path
-#
-#     @property
-#     def done(self) -> bool:
-#         return self.current_fold >= self.num_folds
-#
-#     def connect(self, fit_loop: FitLoop) -> None:
-#         self.fit_loop = fit_loop
-#
-#     def reset(self) -> None:
-#         """Nothing to reset in this loop."""
-#
-#     def on_run_start(self, *args: Any, **kwargs: Any) -> None:
-#         """Used to call `setup_folds` from the `BaseKFoldDataModule` instance and store the original weights of the
-#         model."""
-#
-#         self.lightning_module_state_dict = deepcopy(self.trainer.lightning_module.state_dict())
-#
-#     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
-#         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
-#         print(f"STARTING FOLD {self.current_fold}")
-#         # assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
-#
-#         self.trainer.datamodule.setup_fold_index(self.current_fold)
-#
-#     def advance(self, *args: Any, **kwargs: Any) -> None:
-#         """Used to the run a fitting and testing on the current hold."""
-#         self._reset_fitting()  # requires to reset the tracking stage.
-#         self.fit_loop.run()
-#
-#         self._reset_testing()  # requires to reset the tracking stage.
-#         # self.trainer.test_loop.run()
-#         self.current_fold += 1  # increment fold tracking number.
-#
-#     def on_advance_end(self) -> None:
-#         """Used to save the weights of the current fold and reset the LightningModule and its optimizers."""
-#         self.trainer.save_checkpoint(osp.join(self.export_path, f"model.{self.current_fold}.pt"))
-#         # restore the original weights + optimizers and schedulers.
-#         self.trainer.lightning_module.load_state_dict(self.lightning_module_state_dict)
-#         #  use distinct early stopping for current fold
-#         # self.trainer.callbacks = [PrintCallback(),
-#         #              EarlyStopping(monitor="val_loss_{}".format(self.current_fold),
-#         #                            min_delta=0.0,
-#         #                            check_on_train_epoch_end=True,
-#         #                            patience=5,
-#         #                            check_finite=True,
-#         #                            # stopping_threshold=1e-4,
-#         #                            mode='min'),
-#         #              ]
-#
-#         self.trainer.checkpoint_connector = CheckpointConnector(trainer=self.trainer, resume_from_checkpoint=self.export_path)
-#         self.trainer.state.fn = TrainerFn.FITTING
-#         self.trainer.strategy.setup_optimizers(self.trainer)
-#         self.replace(fit_loop=FitLoop)
-#
-#     def on_run_end(self) -> None:
-#         """Used to compute the performance of the ensemble model on the test set."""
-#         # checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-#         # scv_model = SpatialCVModel(type(self.trainer.lightning_module), checkpoint_paths)
-#         # scv_model.trainer = self.trainer
-#         # This requires to connect the new model and move it the right device.
-#         # self.trainer.strategy.connect(scv_model)
-#         # self.trainer.strategy.model_to_device()
-#         # self.trainer.test_loop.run()
-#
-#     def on_save_checkpoint(self) -> Dict[str, int]:
-#         return {"current_fold": self.current_fold}
-#
-#     def on_load_checkpoint(self, state_dict: Dict) -> None:
-#         self.current_fold = state_dict["current_fold"]
-#
-#     def _reset_fitting(self) -> None:
-#         self.trainer.reset_train_dataloader()
-#         self.trainer.reset_val_dataloader()
-#         self.trainer.state.fn = TrainerFn.FITTING
-#         self.trainer.training = True
-#
-#     def _reset_testing(self) -> None:
-#         self.trainer.reset_test_dataloader()
-#         self.trainer.state.fn = TrainerFn.TESTING
-#         self.trainer.testing = True
-#
-#     def __getattr__(self, key) -> Any:
-#         # requires to be overridden as attributes of the wrapped loop are being accessed.
-#         if key not in self.__dict__:
-#             return getattr(self.fit_loop, key)
-#         return self.__dict__[key]
