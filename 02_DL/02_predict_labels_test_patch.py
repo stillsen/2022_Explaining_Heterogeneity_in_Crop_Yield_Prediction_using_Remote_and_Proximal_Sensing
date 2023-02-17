@@ -61,7 +61,7 @@ if __name__ == "__main__":
     np.random.seed(42)
 
     ## HYPERPARAMETERS
-    num_epochs = 2000
+    num_epochs = 200
     num_epochs_finetuning = 10
     lr = 0.001 # (Krizhevsky et al.2012)
     lr_finetuning = 0.0001
@@ -73,25 +73,27 @@ if __name__ == "__main__":
     num_folds = 4#9 # ranom-CV -> 1
     min_delta = 0.001
     patience = 10
-    min_epochs = 2000
+    min_epochs = 200
     repeat_trainset_ntimes = 1
 
-    # patch_no = 73
-    patch_no = 68
-    directory_id = str(patch_no) + '_grn'
+    patch_no = 76
+    # patch_no = 65
+    # patch_no = 68
+    # test_patch_no = None
+    # test_patch_no = 19
+    test_patch_no = 95
     stride = 30 # 20 is too small
-    # architecture = 'baselinemodel'
+    architecture = 'baselinemodel'
     # architecture = 'densenet'
     # architecture = 'short_densenet'
-    architecture = 'resnet18'
+    # architecture = 'resnet18'
     augmentation = False
     tune_fc_only = True
     pretrained = False
-    features = 'GRN'
-    # features = 'RGB'
+    features = 'RGB'
     # features = 'RGB+'
     num_samples_per_fold = None
-    validation_strategy = 'SCV'
+    validation_strategy = 'SCV_no_test'
     # scv = False
 
     fake_labels = False
@@ -109,40 +111,28 @@ if __name__ == "__main__":
 
     # model_name = output_dirs[patch_no].split('/')[-1]
 
-    # this_output_dir = output_dirs[patch_no]+'_resnet18_SCV_no_test_TL-FC_L1_ALB_TR1_E2000'
     # this_output_dir = output_dirs[patch_no]+'_resnet18_SCV_no_test_L1_ALB_TR1_E2000'
-    # this_output_dir = output_dirs[patch_no]+'_resnet18_SCV_no_test_SSL_ALB_E2000'
+    # this_output_dir = output_dirs[patch_no]+'_resnet18_SCV_no_test_TL-FC_L1_ALB_TR1_E2000'
     # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_SSL_ALB_E2000'
     # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_TL-Finetune_L1_ALB_TR1_E2000'
     # this_output_dir = output_dirs[patch_no] + '_baselinemodel_SCV_no_test_L1_ALB_TR1_E2000'
     # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_L1_ALB_TR1_E1000'
-    # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_TL-FC_L1_ALB_TR1_E2000'
+    this_output_dir = output_dirs[patch_no] + '_baselinemodel_SCV_no_test_L1_ALB_TR1_E2000'
     # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_SSL_ALB_E2000'
-    # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_L1_ALB_TR1_E1000'
     # this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_TL-FC_L1_ALB_TR1_E2000'
-    # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + validation_strategy + '_L1_ALB_TR6'# + str(repeat_trainset_ntimes)
-    # 'P_65_resnet18_SCV_L1_ALB_TR6',
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # this_output_dir = output_dirs[directory_id]+'_'+architecture+'_'+validation_strategy + '_grn'
-    # this_output_dir = output_dirs[directory_id] + '_' + architecture + '_' + validation_strategy + '_L1_ALB_TR' + str(1) + '_E' + str(num_epochs) + '_GRN'
-    this_output_dir = '/beegfs/stiller/PatchCROP_all/Output/P_68_resnet18_SCV_no_test_L1_ALB_TR1_E2000_GRN/'
-
-    print('Setting up data in {}'.format(data_dirs[directory_id]))
-    print('\tLoading {}'.format(input_files_rgb[directory_id]))
-    datamodule = PatchCROPDataModule(input_files=input_files_rgb[directory_id],
-                                     patch_id=patch_no,
-                                     data_dir=data_dirs[directory_id],
+    datamodule = PatchCROPDataModule(input_files=input_files_rgb[test_patch_no],
+                                     patch_id=test_patch_no,
+                                     data_dir=data_dirs[test_patch_no],
                                      stride=stride,
                                      workers=workers,
                                      augmented=augmentation,
-                                     # input_features=features,
                                      input_features=features,
                                      batch_size=batch_size,
                                      validation_strategy=validation_strategy,
                                      fake_labels=fake_labels,
-                                     # input_type='_grn'
                                      )
 
     checkpoint_paths = ['model_f0.ckpt',
@@ -155,6 +145,17 @@ if __name__ == "__main__":
                         'model_f7.ckpt',
                         'model_f8.ckpt',
                         ]
+    if 'SSL' in this_output_dir:
+        checkpoint_paths = ['model_f0_domain-tuning.ckpt',
+                            'model_f1_domain-tuning.ckpt',
+                            'model_f2_domain-tuning.ckpt',
+                            'model_f3_domain-tuning.ckpt',
+                            'model_f4_domain-tuning.ckpt',
+                            'model_f5_domain-tuning.ckpt',
+                            'model_f6_domain-tuning.ckpt',
+                            'model_f7_domain-tuning.ckpt',
+                            'model_f8_domain-tuning.ckpt',
+                            ]
     checkpoint_paths = [this_output_dir+'/'+cp for cp in checkpoint_paths]
 
     if num_samples_per_fold == None:
@@ -162,8 +163,10 @@ if __name__ == "__main__":
     else:
         datamodule.load_subsamples(num_samples=num_samples_per_fold)
 
-    sets = ['train', 'val',
-            # 'test',
+    sets = [
+        # 'train',
+        # 'val',
+        'test',
             ]
     # sets = ['val']
     global_pred = dict()
@@ -181,14 +184,15 @@ if __name__ == "__main__":
         local_r2[s] = []
         local_r[s] = []
         # i=0
-        # for k in range(num_folds):
+        # for k in range(3):
         for k in range(num_folds):
             print('fold {}'.format(k))
             # load data
-            # datamodule.setup_fold_index(k)
-            datamodule.setup_fold(fold=k, training_response_standardization=training_response_normalization)
-            dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(),
-                                # 'test': datamodule.test_dataloader(),
+            # datamodule.setup_fold(fold=k, training_response_standardization=training_response_normalization)
+            dataloaders_dict = {
+                # 'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(),
+                # 'test': datamodule.test_dataloader(),
+                'test': datamodule.all_dataloader(),
                                 }
 
             # set up model wrapper and input data
@@ -219,9 +223,9 @@ if __name__ == "__main__":
             model_wrapper.model.load_state_dict(state_dict_revised)
             # else:
             #     model_wrapper.model.load_state_dict(state_dict, map_location=torch.device('cpu'))
-            # # Parallelize model
+            # Parallelize model
             # if torch.cuda.device_count() > 1:
-            # model_wrapper.model = nn.DataParallel(model_wrapper.model)
+            #     model_wrapper.model = nn.DataParallel(model_wrapper.model)
 
             # make prediction
             # for each fold store labels and predictions

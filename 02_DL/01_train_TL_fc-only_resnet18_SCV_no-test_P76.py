@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-script to train the baseline model following (Nevavuori et al.2019) and (Krizhevsky et al.2012)
+script to train model
 """
 
 # Built-in/Generic Imports
 import os, random, time, gc
 
+
 # Libs
+from ctypes import c_int
+
 import numpy as np
 import pandas as pd
 
@@ -17,8 +20,6 @@ import ray
 from ray import tune
 from ray.tune.schedulers import HyperBandForBOHB
 from ray.tune.search.bohb import TuneBOHB
-from ray.air import session
-from ray.air.checkpoint import Checkpoint
 
 
 import torch
@@ -32,15 +33,6 @@ from TuneYieldRegressor import TuneYieldRegressor
 
 from directory_listing import output_dirs, data_dirs, input_files_rgb
 
-
-__author__ = 'Stefan Stiller'
-__copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
-__credits__ = ['Stefan Stiller, Gohar Ghazaryan, Kathrin Grahmann, Masahiro Ryo']
-__license__ = 'GNU GPLv3'
-__version__ = '0.1'
-__maintainer__ = 'Stefan Stiller'
-__email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
-__status__ = 'Dev'
 
 def start_timer(device=None):
     global start_time
@@ -60,8 +52,20 @@ def end_timer_and_get_time(local_msg):
     print('Max memory used by tensors = {} bytes'.format(torch.cuda.max_memory_allocated()))
     return end_time - start_time
 
+
+__author__ = 'Stefan Stiller'
+__copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
+__credits__ = ['Stefan Stiller, Gohar Ghazaryan, Kathrin Grahmann, Masahiro Ryo']
+__license__ = 'GNU GPLv3'
+__version__ = '0.1'
+__maintainer__ = 'Stefan Stiller'
+__email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
+__status__ = 'Dev'
+
+
 if __name__ == "__main__":
     # ray.init(local_mode=True)
+
     seed = 42
     # seed_everything(seed)
     torch.manual_seed(seed)
@@ -70,9 +74,6 @@ if __name__ == "__main__":
 
     ## HYPERPARAMETERS
     num_epochs = 2000
-    # num_epochs_finetuning = 10
-    # lr = 0.001 # (Krizhevsky et al.2012)
-    # lr = 0.012234672196538655
     lr = None
     # lr_finetuning = 0.0005
     momentum = 0.9 # (Krizhevsky et al.2012)
@@ -81,35 +82,35 @@ if __name__ == "__main__":
     wd = None
     classes = 1
     # batch_size = 16
-    # batch_size = None
-    batch_size = 128 # tuning 1
+    batch_size = None
+    # batch_size = 256 # tuning 1
     num_folds = 4#9 # ranom-CV -> 1
     min_delta = 0.01 # aka 1%
     patience = 10
     min_epochs = 2000
-    duplicate_trainset_ntimes = 1
+    repeat_trainset_ntimes = 1
 
     # patch_no = 73
-    patch_no = 65
+    patch_no = 76
     stride = 30 # 20 is too small
     # architecture = 'baselinemodel'
     # architecture = 'densenet'
     architecture = 'resnet18'
     augmentation = True
-    tune_fc_only = False
-    pretrained = False
+    tune_fc_only = True
+    pretrained = True
     features = 'RGB'
     # features = 'RGB+'
     num_samples_per_fold = None # subsamples? -> None means do not subsample but take whole fold
-    validation_strategy = 'SCV_no_test' # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; SCV_no_test; RCV => Random Cross Validation
+    validation_strategy = 'SCV_no_test' # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; RCV => Random Cross Validation
     # scv = False
     fake_labels = False
     # training_response_normalization = True
     training_response_normalization = False
+    # criterion = nn.MSELoss(reduction='mean')
     criterion = nn.L1Loss(reduction='mean')
 
-    this_output_dir = output_dirs[patch_no]+'_'+architecture+'_'+validation_strategy+'_L1_ALB_TR'+str(duplicate_trainset_ntimes)+'_E'+str(num_epochs)
-    # this_output_dir = output_dirs[patch_no] + '_' + 'SSL' + '_' + validation_strategy + '_grn'
+    this_output_dir = output_dirs[patch_no]+'_'+architecture+'_'+validation_strategy+'_TL-FC_L1_ALB_TR'+str(repeat_trainset_ntimes)+'_E'+str(num_epochs)
 
     # check if exists, -> error,
     # else create
@@ -117,7 +118,6 @@ if __name__ == "__main__":
         print('creating: \t {}'.format(this_output_dir))
         os.mkdir(this_output_dir)
     else:
-        # raise FileExistsError("{} is a directory, cannot create new one".format(this_output_dir))
         warnings.warn("{} directory exists. WILL OVERRIDE.".format(this_output_dir))
 
     print('working on patch {}'.format(patch_no))
@@ -146,11 +146,9 @@ if __name__ == "__main__":
                                      )
     datamodule.prepare_data(num_samples=num_samples_per_fold)
 
-    # for k in range(1):
     for k in range(num_folds):
         print('#'*60)
         print('Fold: {}'.format(k))
-
         # setup data according to folds
         # quadrants:
         # 0 1
@@ -160,14 +158,11 @@ if __name__ == "__main__":
         #  1    3   {0,2}  |  1
         #  3    2   {0,1}  |  2
         #  2    0   {1,3}  |  3
-        datamodule.setup_fold(fold=k, training_response_standardization=training_response_normalization, duplicate_trainset_ntimes=duplicate_trainset_ntimes)
+        datamodule.setup_fold(fold=k, training_response_standardization=training_response_normalization, duplicate_trainset_ntimes=repeat_trainset_ntimes)
         # datamodule.create_debug_samples(n=20)
-        # datamodule.set_batch_size(batch_size=batch_size)
-        # dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(),
-        #                     # 'test': datamodule.test_dataloader(),
-        #                     }
-        ####################### tune hyper parameters #######################3
-        if k >= 0:
+
+        ###### FROZEN CONV ######### tune hyper parameters #######################
+        if k>=0:
             param_space = {
                 "lr": tune.loguniform(1e-6, 1e-1),
                 "wd": tune.uniform(0, 5 * 1e-3),
@@ -186,33 +181,8 @@ if __name__ == "__main__":
                 seed=seed,)
             bohb_search = tune.search.ConcurrencyLimiter(bohb_search, max_concurrent=4)
 
-            tune_name = 'Tuning_{}_{}_all_bayes_L1_ALB_f{}_{}_TR{}'.format(architecture, validation_strategy, k, patch_no, duplicate_trainset_ntimes)
-            # analysis = tune.run(tune.with_parameters(
-            #                         TuneYieldRegressor,
-            #                         momentum=momentum,
-            #                         patch_no=patch_no,
-            #                         architecture=architecture,
-            #                         tune_fc_only=tune_fc_only,
-            #                         pretrained=pretrained,
-            #                         datamodule=datamodule,
-            #                         criterion=criterion,
-            #                         device=device,
-            #                         ),
-            #                     checkpoint_freq=10,
-            #                     max_failures=5,
-            #                     # stop={"training_iteration" : 20},
-            #                     config=param_space,
-            #                     resources_per_trial={"gpu": 2},
-            #                     metric='val_loss',
-            #                     mode='min',
-            #                     resume="AUTO",
-            #                     search_alg=algo,
-            #                     scheduler=bohb_hyperband,
-            #                     num_samples=20,
-            #                     stop={"training_iteration": 100},
-            #                     name=tune_name,
-            #                     local_dir=this_output_dir,
-            #                     )
+            tune_name = 'Tuning_{}_{}_all_bayes_L1_ALB_f{}_{}_TR{}'.format(architecture,validation_strategy,k,patch_no, repeat_trainset_ntimes)
+
             tuner = tune.Tuner(
                                 tune.with_resources(
                                     tune.with_parameters(
@@ -223,13 +193,12 @@ if __name__ == "__main__":
                                         tune_fc_only=tune_fc_only,
                                         pretrained=pretrained,
                                         datamodule=datamodule,
-                                        # datamodule=dataloaders_dict,
                                         criterion=criterion,
                                         device=device,
                                         workers=workers,
                                         training_response_standardizer=datamodule.training_response_standardizer
                                         ),
-                                    {"gpu": 1}),
+                                    {"gpu": workers}),
                                 param_space=param_space,
                                 tune_config=tune.TuneConfig(
                                 metric='val_loss',
@@ -249,7 +218,6 @@ if __name__ == "__main__":
             # if k ==1:
             #     ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
             #     tuner.restore(path=os.path.join(this_output_dir,tune_name))
-            # ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
             analysis = tuner.fit()
             torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"),
                        os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
@@ -264,12 +232,14 @@ if __name__ == "__main__":
         # lr = 0.001
         # wd = 0.0005
         # batch_size = 64
-        ###################### Training #########################
+
+        ###### FROZEN CONV ######### train last layer #######################
         datamodule.set_batch_size(batch_size=batch_size)
         dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(),
                             # 'test': datamodule.test_dataloader(),
                             }
         start_timer()
+
         model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
                                           device=device,
                                           lr=lr,
@@ -282,10 +252,10 @@ if __name__ == "__main__":
                                           training_response_standardizer=datamodule.training_response_standardizer,
                                           criterion=criterion,
                                           )
-
-        # # Send the model to GPU
-        # if torch.cuda.device_count() > 1:
-        #     model_wrapper.model = nn.DataParallel(model_wrapper.model)
+        model_wrapper.print_children_require_grads()
+        # Send the model to GPU
+        if workers > 1:
+            model_wrapper.model = nn.DataParallel(model_wrapper.model)
         model_wrapper.model.to(device)
 
         # Train and evaluate

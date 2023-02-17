@@ -22,6 +22,7 @@ output: Foldername.pt
 import os
 import warnings
 import random
+import math
 
 # Libs
 import pandas as pd
@@ -130,7 +131,7 @@ class PatchCROPDataModule:
                  fake_labels:bool = False,
                  ):
         super().__init__()
-        self.flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
+        self.flowerstrip_patch_ids = [12, 13, 19, 20, 21, 105, 110, 114, 115, 119]
         self.patch_ids = ['12', '13', '19', '20', '21', '39', '40', '49', '50', '51', '58', '59', '60', '65', '66', '68', '73', '74', '76', '81', '89', '90', '95', '96', '102', '105', '110', '114', '115', '119']
 
         self.data_dir = data_dir
@@ -150,6 +151,18 @@ class PatchCROPDataModule:
         # Datesets
         self.data_set = None
         self.setup_done = False
+
+        if self.input_features == 'RGB':
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+        elif self.input_features == 'GRN':
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+            warnings.warn('Channel normalization for GRN most likely different from RGB')
+        elif self.input_features == 'RGBRN':
+            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406, 0, 0],
+                                    std=[0.229, 0.224, 0.225, 1, 1])
+            raise NotImplemented("Channel normalization not implemented for RGBRN")
 
     def prepare_data(self, num_samples:int = None) -> None: # would actually make more sense to put it to setup, but there it is called as several processes
         # load the data
@@ -171,7 +184,7 @@ class PatchCROPDataModule:
                 if self.input_features == "RGB":
                     file_name = 'Patch_ID_' + str(self.patch_id) + '.pt'
                 elif self.input_features == "GRN":
-                    file_name = 'Patch_ID_' + str(self.patch_id) + '_GRN.pt'
+                    file_name = 'Patch_ID_' + str(self.patch_id) + '_grn.pt'
                 elif self.input_features == "RGBRN":
                     file_name = 'Patch_ID_' + str(self.patch_id) + '_RGBRN.pt'
 
@@ -203,6 +216,7 @@ class PatchCROPDataModule:
                         else:
                             feature_matrix = torch.cat((feature_matrix, f), 0)
                     # sliding window  -> n samples of 224x224 images
+                    # creates self.data_set
                     self.generate_sliding_window_augmented_ds(label_matrix, feature_matrix)
 
                 # save data_set
@@ -274,7 +288,10 @@ class PatchCROPDataModule:
             feature_arr[4, :, :] = ((feature_arr[4, :, :] - c5_min) / c5_max) * 255
 
         if self.fake_labels:
+            # three channel pixel-wise average -> but this is still in range [0..255]
             label_arr = (feature_arr[0,:,:] + feature_arr[1,:,:] + feature_arr[2,:,:])/3
+            # normalize to range [0..255]
+            label_arr = label_arr / 255
         else:
             label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x] #label matrix un-normalized
         # set sizes
@@ -314,7 +331,7 @@ class PatchCROPDataModule:
                     label_kernel_tensor = torch.cat((label_kernel_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
         self.data_set = (feature_kernel_tensor, label_kernel_tensor)
 
-    def setup_fold(self, fold: int = 0, training_response_standardization: bool = True, repeat_trainset_ntimes:int = 1) -> None:
+    def setup_fold(self, fold: int = 0, training_response_standardization: bool = True, duplicate_trainset_ntimes:int = 1, test_transforms = None) -> None:
         '''
         Set up validation and train data set using self.data_set and apply normalization for both and augmentations for the train set if
         self.augmented. Overlap samples between train and test set are discarded.
@@ -331,17 +348,8 @@ class PatchCROPDataModule:
 
         # Splitting into datasets according to validation strategy
         # Part 1) Compute subset indexes
-        if self.validation_strategy == 'SCV': # spatial cross valiation
-            if self.stride == 10: # for stride = 10
-                items_per_row = 209
-                buffer_to = 94
-                buffer_from = 116
-            elif self.stride == 30:
-                items_per_row = 69
-                buffer_to = 31
-                buffer_from = 39
-            x_def = y_def = np.arange(items_per_row)
-
+        if self.validation_strategy == 'SCV' or self.validation_strategy == 'SCV_no_test': # spatial cross validation with or without test set
+            print('splitting for SCV')
             # ranges for x and y
             # quadrants:
             # 0 1
@@ -352,36 +360,182 @@ class PatchCROPDataModule:
             #  3    2   {0,1}  |  2
             #  2    0   {1,3}  |  3
 
-            test_range = [(np.arange(buffer_to), np.arange(buffer_to)), # quadrant 0
-                          (np.arange(buffer_from, items_per_row), np.arange(buffer_to)), # quadrant 1
-                          (np.arange(buffer_from, items_per_row), np.arange(buffer_from, items_per_row)), # quadrant 3
-                          (np.arange(buffer_to), np.arange(buffer_from, items_per_row)), # quadrant 2
-                          ]
-            val_range = [(np.arange(buffer_from, items_per_row), np.arange(buffer_to)), # quadrant 1
-                         (np.arange(buffer_from, items_per_row), np.arange(buffer_from, items_per_row)), # quadrant 3
-                         (np.arange(buffer_to), np.arange(buffer_from, items_per_row)), # quadrant 2
-                         (np.arange(buffer_to), np.arange(buffer_to)), # quadrant 0
+            # if self.stride == 10: # for stride = 10
+            #     items_per_row = 209
+            #     buffer_to = 94
+            #     buffer_from = 116
+            # elif self.stride == 30:
+            #     items_per_row = 69
+            #     buffer_to = 31
+            #     buffer_from = 39
+            # x_def = y_def = np.arange(items_per_row)
+
+            #sliding window size
+            window_size = 224
+            stride = self.stride
+            x_size = y_size = 2322
+
+            # number of sliding window samples in any given row
+            samples_per_row = samples_per_col = math.floor((x_size - window_size) / stride)
+
+            x_def = y_def = np.arange(samples_per_row)
+            # center lines to split the patch into folds at
+            center_x = center_y = x_size/2
+            # last row/col index such that samples do not overlap between folds in quadrant 0/2
+            buffer_to_x = buffer_to_y = math.floor((math.floor(center_x) - window_size)/stride)
+            # first row/col index such that samples do not overlap between folds in quadrant 1/3
+            buffer_from_x = buffer_from_y = math.ceil(math.floor(center_x)/stride)
+            # last row/col index such that samples CAN OVERLAP between folds in quadrant 0/2
+            overlap_to_x = overlap_to_y = math.floor((math.floor(center_x)) / stride)
+            # first row/col index such that samples CAN OVERLAP between folds in quadrant 1/3
+            overlap_from_x = overlap_from_y = math.ceil(math.floor(center_x) / stride)
+            if self.patch_id in self.flowerstrip_patch_ids:
+                y_size = 1935
+                center_y = y_size/2
+                samples_per_col = math.floor((y_size - window_size) / stride)
+                y_def = np.arange(samples_per_col)
+                buffer_to_y = math.floor((math.floor(center_y) - window_size)/stride)
+                buffer_from_y = math.ceil(math.floor(center_y) / stride)
+                overlap_to_y = math.floor((math.floor(center_y)) / stride)
+                # buffer_from_y = math.ceil(math.floor(center_y) / stride)
+                overlap_from_y = math.ceil(math.floor(center_y) / stride)
+
+            debug_test_map = [np.zeros((1, y_size, x_size)),
+                         np.zeros((1, y_size, x_size)),
+                         np.zeros((1, y_size, x_size)),
+                         np.zeros((1, y_size, x_size)),
                          ]
-            train_range = [(np.arange(items_per_row), np.arange(buffer_from, items_per_row)),
-                           (np.arange(buffer_to), np.arange(items_per_row)),
-                           (np.arange(items_per_row), np.arange(buffer_to)),
-                           (np.arange(buffer_from, items_per_row), np.arange(items_per_row)),
-                           ]
+            debug_val_map = [np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                ]
+            debug_train_map = [np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                np.zeros((1, y_size, x_size)),
+                                                                ]
+            # no overlap quadrants
+            quadrant_0 = [(x,y) for x in np.arange(buffer_to_x) for y in np.arange(buffer_to_y)]
+            quadrant_1 = [(x,y) for x in np.arange(buffer_from_x, samples_per_row) for y in np.arange(buffer_to_y)]
+            quadrant_2 = [(x,y) for x in np.arange(buffer_to_x) for y in np.arange(buffer_from_y, samples_per_col)]
+            quadrant_3 = [(x,y) for x in np.arange(buffer_from_x, samples_per_row) for y in np.arange(buffer_from_y, samples_per_col)]
 
-            test_idxs = []
-            val_idxs = []
-            train_idxs = []
+            # overlap quadrants
+            overlap_quadrant_0 = [(x,y) for x in np.arange(overlap_to_x) for y in np.arange(overlap_to_y)]
+            overlap_quadrant_1 = [(x,y) for x in np.arange(overlap_from_x, samples_per_row) for y in np.arange(overlap_to_y)]
+            overlap_quadrant_2 = [(x,y) for x in np.arange(overlap_to_x) for y in np.arange(overlap_from_y, samples_per_col)]
+            overlap_quadrant_3 = [(x,y) for x in np.arange(overlap_from_x, samples_per_row) for y in np.arange(overlap_from_y, samples_per_col)]
 
-            for y in y_def:
-                for x in x_def:
-                    idx = (x + y * items_per_row)
-                    if x in test_range[fold][0] and y in test_range[fold][1]:
-                        test_idxs.append(idx)
-                    elif x in val_range[fold][0] and y in val_range[fold][1]:
-                        val_idxs.append(idx)
-                    elif x in train_range[fold][0] and y in train_range[fold][1]:
-                        train_idxs.append(idx)
+            half_23 = [(x, y) for x in np.arange(samples_per_row) for y in np.arange(buffer_from_y, samples_per_col)]  # (np.arange(samples_per_row), np.arange(buffer_from_y, samples_per_row))
+            half_02 = [(x, y) for x in np.arange(buffer_to_x) for y in np.arange(samples_per_col)]  # (np.arange(buffer_to_x), np.arange(samples_per_row))
+            half_01 = [(x, y) for x in np.arange(samples_per_row) for y in np.arange(buffer_to_y)]  # (np.arange(samples_per_row), np.arange(buffer_to_y))
+            half_13 = [(x, y) for x in np.arange(buffer_from_x, samples_per_row) for y in np.arange(samples_per_col)]  # (np.arange(buffer_from_x, samples_per_row), np.arange(samples_per_row))
 
+            if self.validation_strategy == 'SCV': # spatial cross validation with test set
+                test_range = [quadrant_0, # quadrant 0
+                              quadrant_1, # quadrant 1
+                              quadrant_3, # quadrant 3
+                              quadrant_2, # quadrant 2
+                              ]
+                val_range = [quadrant_1, # quadrant 1
+                             quadrant_3, # quadrant 3
+                             quadrant_2, # quadrant 2
+                             quadrant_0, # quadrant 0
+                             ]
+                train_range = [half_23,
+                               half_02,
+                               half_01,
+                               half_13,
+                               ]
+
+                test_idxs = []
+                val_idxs = []
+                train_idxs = []
+
+                for y in y_def:
+                    for x in x_def:
+                        idx = (x + y * samples_per_row)
+                        if (x,y) in test_range[fold]:
+                            test_idxs.append(idx)
+                            debug_test_map[fold][0, y*stride:y*stride+window_size, x*stride:x*stride+window_size] += 1
+                        elif (x,y) in val_range[fold]:
+                            val_idxs.append(idx)
+                            debug_val_map[fold][0, y*stride:y*stride+window_size, x*stride:x*stride+window_size] += 1
+                        elif (x,y) in train_range[fold]:
+                            train_idxs.append(idx)
+                            debug_train_map[fold][0, y*stride:y*stride+window_size, x*stride:x*stride+window_size] += 1
+                        # if x in test_range[fold][0] and y in test_range[fold][1]:
+                        #     test_idxs.append(idx)
+                        # elif x in val_range[fold][0] and y in val_range[fold][1]:
+                        #     val_idxs.append(idx)
+                        # elif x in train_range[fold][0] and y in train_range[fold][1]:
+                        #     train_idxs.append(idx)
+
+            elif self.validation_strategy == 'SCV_no_test': # spatial cross validation no test set
+                threequarter_230 = list(set(half_02+ half_23))
+                threequarter_021 = list(set(half_02+ half_01))
+                threequarter_013 = list(set(half_01+ half_13))
+                threequarter_132 = list(set(half_13+ half_23))
+
+                val_range = [quadrant_1, # quadrant 1
+                             quadrant_3, # quadrant 3
+                             quadrant_2, # quadrant 2
+                             quadrant_0, # quadrant 0
+                             ]
+                train_range = [threequarter_230,
+                               threequarter_021,
+                               threequarter_013,
+                               threequarter_132,
+                               ]
+
+                test_idxs = []
+                val_idxs = []
+                train_idxs = []
+
+                for y in y_def:
+                    for x in x_def:
+                        idx = (x + y * samples_per_row)
+                        if (x,y) in val_range[fold]:
+                            val_idxs.append(idx)
+                            debug_val_map[fold][0, y*stride:y*stride+window_size, x*stride:x*stride+window_size] += 1
+                        elif (x,y) in train_range[fold]:
+                            train_idxs.append(idx)
+                            debug_train_map[fold][0, y*stride:y*stride+window_size, x*stride:x*stride+window_size] += 1
+            # debug images to verify correct splitting and amount sample
+            # create folders
+            print('creating debug fold images')
+            dir = os.path.join(self.data_dir, 'Test_Figs')
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+            #val
+            m = np.max(debug_val_map[fold])
+            debug_val_map[fold] = debug_val_map[fold]#/m
+            fig, ax = plt.subplots()
+            c = plt.imshow(debug_val_map[fold][0,:,:], cmap='jet')
+            fig.colorbar(c, ax=ax)
+            ax.xaxis.tick_top()
+            plt.tight_layout()
+            plt.savefig(os.path.join(dir, 'val_folds_{}_{}_{}.png'.format(fold,stride,self.validation_strategy)))
+            #train
+            m = np.max(debug_train_map[fold])
+            debug_train_map[fold] = debug_train_map[fold] #/ m
+            fig, ax = plt.subplots()
+            c = plt.imshow(debug_train_map[fold][0,:,:], cmap='jet')
+            fig.colorbar(c, ax=ax)
+            ax.xaxis.tick_top()
+            plt.tight_layout()
+            plt.savefig(os.path.join(dir, 'train_folds_{}_{}_{}.png'.format(fold,stride,self.validation_strategy)))
+            #test
+            if self.validation_strategy == 'SCV':
+                m = np.max(debug_test_map[fold])
+                debug_test_map[fold] = debug_test_map[fold] #/ m
+                fig, ax = plt.subplots()
+                c = plt.imshow(debug_test_map[fold][0,:,:], cmap='jet')
+                fig.colorbar(c, ax=ax)
+                ax.xaxis.tick_top()
+                plt.tight_layout()
+                plt.savefig(os.path.join(dir, 'test_folds_{}_{}_{}.png'.format(fold, stride, self.validation_strategy)))
         elif self.validation_strategy == 'SHOV': #spatial hold out validation
             # train_idxs = np.arange(0,61)
             # val_idxs = np.arange(61, 81)
@@ -405,44 +559,38 @@ class PatchCROPDataModule:
                                                       'std': torch.std(self.data_set[1][train_idxs]),
                                                    }
             # print(self.training_response_standardizer)
-            train_set = (self.data_set[0][train_idxs, :, :, :].repeat(repeat_trainset_ntimes, 1, 1, 1),
-                         (self.data_set[1][train_idxs].repeat(repeat_trainset_ntimes) - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
+            # train_set = (self.data_set[0][train_idxs, :, :, :].repeat(duplicate_trainset_ntimes, 1, 1, 1),
+            #              (self.data_set[1][train_idxs].repeat(duplicate_trainset_ntimes) - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
+            train_set = (self.data_set[0][train_idxs, :, :, :],
+                         (self.data_set[1][train_idxs] - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
             val_set = (self.data_set[0][val_idxs, :, :, :],
                        (self.data_set[1][val_idxs] - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
             if self.validation_strategy == 'SCV':
                 test_set = (self.data_set[0][test_idxs, :, :, :],
                            (self.data_set[1][test_idxs] - self.training_response_standardizer['mean']) / self.training_response_standardizer['std'])
         else:
-            train_set = (self.data_set[0][train_idxs, :, :, :].repeat(repeat_trainset_ntimes, 1, 1, 1), self.data_set[1][train_idxs].repeat(repeat_trainset_ntimes))
+            # train_set = (self.data_set[0][train_idxs, :, :, :].repeat(duplicate_trainset_ntimes, 1, 1, 1), self.data_set[1][train_idxs].repeat(duplicate_trainset_ntimes))
+            train_set = (self.data_set[0][train_idxs, :, :, :], self.data_set[1][train_idxs])
             val_set = (self.data_set[0][val_idxs, :, :, :], self.data_set[1][val_idxs])
             if self.validation_strategy == 'SCV':
                 test_set = (self.data_set[0][test_idxs, :, :, :], self.data_set[1][test_idxs])
 
-        if self.input_features == 'RGB':
-            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
-        elif self.input_features == 'GRN':
-            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
-            warnings.warn('Channel normalization for GRN most likely different from RGB')
-        elif self.input_features == 'RGBRN':
-            self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406, 0, 0],
-                                    std=[0.229, 0.224, 0.225, 1, 1])
-            raise NotImplemented("Channel normalization not implemented for RGBRN")
-
-        testset_transformer = A.Compose([ #assumption by albumentations: image is in HWC
-            self.normalize,
-            ToTensorV2(), # convert to CHW
-        ])
+        if test_transforms is None:
+            testset_transformer = A.Compose([ #assumption by albumentations: image is in HWC
+                self.normalize,
+                ToTensorV2(), # convert to CHW
+            ])
+        else:
+            testset_transformer = test_transforms
 
         # type cast to numpy again for compatibility with albumentations\
         # val_set = (val_set[0].moveaxis(1,3).numpy(), val_set[1].numpy())
         # test_set = (test_set[0].moveaxis(1,3).numpy(), test_set[1].numpy())
         val_set = (val_set[0].movedim(1, 3).numpy(), val_set[1].numpy())
-        test_set = (test_set[0].movedim(1, 3).numpy(), test_set[1].numpy())
 
         self.val_fold = TransformTensorDataset(val_set, transform=testset_transformer)
         if self.validation_strategy == 'SCV':
+            test_set = (test_set[0].movedim(1, 3).numpy(), test_set[1].numpy())
             self.test_fold = TransformTensorDataset(test_set, transform=testset_transformer)
 
         # only train set is augmented if enabled
@@ -490,10 +638,33 @@ class PatchCROPDataModule:
         transformer = A.Compose([self.normalize,
                                  ToTensorV2(),
                                           ])
-
-        whole_ds = TransformTensorDataset(self.data_set, transform=transformer)
+        data_set = (self.data_set[0].movedim(1, 3).numpy(), self.data_set[1].numpy())
+        whole_ds = TransformTensorDataset(data_set, transform=transformer)
 
         return DataLoader(whole_ds, num_workers=self.workers, batch_size=self.batch_size)
+
+    # def train_dataloader(self) -> DataLoader:
+    #     print('loading training set with {} samples'.format(len(self.train_fold)))
+    #     return DataLoader(self.train_fold, batch_size=self.batch_size, num_workers=self.workers)
+    #
+    #
+    # def val_dataloader(self) -> DataLoader:
+    #     print('loading validation set with {} samples'.format(len(self.val_fold)))
+    #     return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
+    #
+    # def test_dataloader(self) -> DataLoader:
+    #     print('loading validation set with {} samples'.format(len(self.test_fold)))
+    #     return DataLoader(self.test_fold, num_workers=self.workers, batch_size=self.batch_size)
+    #
+    # def all_dataloader(self) -> DataLoader:
+    #     print('loading whole patch data set with {} samples'.format(len(self.data_set)))
+    #     transformer = A.Compose([self.normalize,
+    #                              ToTensorV2(),
+    #                                       ])
+    #     data_set = (self.data_set[0].movedim(1, 3).numpy(), self.data_set[1].numpy())
+    #     whole_ds = TransformTensorDataset(data_set, transform=transformer)
+    #
+    #     return DataLoader(whole_ds, num_workers=self.workers, batch_size=self.batch_size)
 
     # def predict_dataloader(self) -> DataLoader:
     #     # transformer = transforms.Compose([transforms.ToTensor()])

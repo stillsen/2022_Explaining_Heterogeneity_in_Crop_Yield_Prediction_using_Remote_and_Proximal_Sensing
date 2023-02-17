@@ -90,7 +90,8 @@ if __name__ == "__main__":
     duplicate_trainset_ntimes = 1
 
     # patch_no = 73
-    patch_no = 65
+    patch_no = 68
+    directory_id = str(patch_no) + '_grn'
     stride = 30 # 20 is too small
     # architecture = 'baselinemodel'
     # architecture = 'densenet'
@@ -98,7 +99,8 @@ if __name__ == "__main__":
     augmentation = True
     tune_fc_only = False
     pretrained = False
-    features = 'RGB'
+    # features = 'RGB'
+    features = 'GRN'
     # features = 'RGB+'
     num_samples_per_fold = None # subsamples? -> None means do not subsample but take whole fold
     validation_strategy = 'SCV_no_test' # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; SCV_no_test; RCV => Random Cross Validation
@@ -108,7 +110,7 @@ if __name__ == "__main__":
     training_response_normalization = False
     criterion = nn.L1Loss(reduction='mean')
 
-    this_output_dir = output_dirs[patch_no]+'_'+architecture+'_'+validation_strategy+'_L1_ALB_TR'+str(duplicate_trainset_ntimes)+'_E'+str(num_epochs)
+    this_output_dir = output_dirs[directory_id]+'_'+architecture+'_'+validation_strategy+'_L1_ALB_TR'+str(duplicate_trainset_ntimes)+'_E'+str(num_epochs)+'_GRN'
     # this_output_dir = output_dirs[patch_no] + '_' + 'SSL' + '_' + validation_strategy + '_grn'
 
     # check if exists, -> error,
@@ -120,7 +122,7 @@ if __name__ == "__main__":
         # raise FileExistsError("{} is a directory, cannot create new one".format(this_output_dir))
         warnings.warn("{} directory exists. WILL OVERRIDE.".format(this_output_dir))
 
-    print('working on patch {}'.format(patch_no))
+    print('working on patch {}'.format(directory_id))
     # loop over folds, last fold is for testing only
 
     # Detect if we have a GPU available
@@ -132,10 +134,10 @@ if __name__ == "__main__":
         workers = 1#torch.cuda.device_count()
         print('\twith {} workers'.format(workers))
 
-    print('Setting up data in {}'.format(data_dirs[patch_no]))
-    datamodule = PatchCROPDataModule(input_files=input_files_rgb[patch_no],
+    print('Setting up data in {}'.format(data_dirs[directory_id]))
+    datamodule = PatchCROPDataModule(input_files=input_files_rgb[directory_id],
                                      patch_id=patch_no,
-                                     data_dir=data_dirs[patch_no],
+                                     data_dir=data_dirs[directory_id],
                                      stride=stride,
                                      workers=workers,
                                      augmented=augmentation,

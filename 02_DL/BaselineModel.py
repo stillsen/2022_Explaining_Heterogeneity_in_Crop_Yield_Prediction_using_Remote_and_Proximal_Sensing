@@ -62,9 +62,10 @@ class BaselineModel(nn.Module):
         self.regressor = nn.Sequential(OrderedDict([
             ('fc_7', nn.Linear(in_features=5*5*128, out_features=1024)),
             ('relu_7', nn.ReLU(inplace=True)),
-            ('fc_8', nn.Linear(in_features=1024, out_features=1024)),
-            ('relu_8', nn.ReLU(inplace=True)),
-            ('fc_9', nn.Linear(in_features=1024, out_features=1))
+            # ('fc_8', nn.Linear(in_features=1024, out_features=1024)),
+            # ('relu_8', nn.ReLU(inplace=True)),
+            ('fc_8', nn.Linear(in_features=1024, out_features=1))
+            # ('fc_9', nn.Linear(in_features=1024, out_features=1))
             ]))
         # self.regressor = nn.Sequential(OrderedDict([
         #     ('fc_7', nn.Linear(in_features=5 * 5 * 128, out_features=1024)),

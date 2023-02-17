@@ -69,7 +69,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     ## HYPERPARAMETERS
-    num_epochs = 2000
+    num_epochs = 1000
     # num_epochs_finetuning = 10
     # lr = 0.001 # (Krizhevsky et al.2012)
     # lr = 0.012234672196538655
@@ -81,16 +81,16 @@ if __name__ == "__main__":
     wd = None
     classes = 1
     # batch_size = 16
-    # batch_size = None
-    batch_size = 128 # tuning 1
+    batch_size = None
+    # batch_size = 128 # tuning 1
     num_folds = 4#9 # ranom-CV -> 1
     min_delta = 0.01 # aka 1%
     patience = 10
-    min_epochs = 2000
+    min_epochs = 1000
     duplicate_trainset_ntimes = 1
 
     # patch_no = 73
-    patch_no = 65
+    patch_no = 68
     stride = 30 # 20 is too small
     # architecture = 'baselinemodel'
     # architecture = 'densenet'
@@ -246,13 +246,8 @@ if __name__ == "__main__":
                                 local_dir=this_output_dir,)
                                 )
 
-            # if k ==1:
-            #     ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
-            #     tuner.restore(path=os.path.join(this_output_dir,tune_name))
-            # ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
             analysis = tuner.fit()
-            torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"),
-                       os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
+            torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"), os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
             best_result = analysis.get_best_result(metric="val_loss", mode="min")
             lr = best_result.config['lr']
             wd = best_result.config['wd']
@@ -260,6 +255,7 @@ if __name__ == "__main__":
             print('\tbest config: ', analysis.get_best_result(metric="val_loss", mode="min"))
         else:
             analysis = torch.load(os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
+
 
         # lr = 0.001
         # wd = 0.0005

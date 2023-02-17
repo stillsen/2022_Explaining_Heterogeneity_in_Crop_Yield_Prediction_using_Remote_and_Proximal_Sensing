@@ -7,6 +7,8 @@ script to train the baseline model following (Nevavuori et al.2019) and (Krizhev
 import os, random, time, gc
 
 # Libs
+from ctypes import c_int
+
 import numpy as np
 import pandas as pd
 
@@ -20,7 +22,6 @@ from ray.tune.search.bohb import TuneBOHB
 from ray.air import session
 from ray.air.checkpoint import Checkpoint
 
-
 import torch
 from torch import nn
 
@@ -29,9 +30,8 @@ import warnings
 from PatchCROPDataModule import PatchCROPDataModule
 from RGBYieldRegressor import RGBYieldRegressor
 from TuneYieldRegressor import TuneYieldRegressor
-
+# from MC_YieldRegressor import MCYieldRegressor
 from directory_listing import output_dirs, data_dirs, input_files_rgb
-
 
 __author__ = 'Stefan Stiller'
 __copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
@@ -42,6 +42,7 @@ __maintainer__ = 'Stefan Stiller'
 __email__ = 'stefan.stiller@zalf.de, stillsen@gmail.com'
 __status__ = 'Dev'
 
+
 def start_timer(device=None):
     global start_time
     gc.collect()
@@ -51,6 +52,7 @@ def start_timer(device=None):
         torch.cuda.synchronize()
     start_time = time.time()
 
+
 def end_timer_and_get_time(local_msg):
     if device == torch.device("cuda"):
         torch.cuda.synchronize()
@@ -59,6 +61,7 @@ def end_timer_and_get_time(local_msg):
     print("Total execution time = {} sec".format(end_time - start_time))
     print('Max memory used by tensors = {} bytes'.format(torch.cuda.max_memory_allocated()))
     return end_time - start_time
+
 
 if __name__ == "__main__":
     # ray.init(local_mode=True)
@@ -75,40 +78,41 @@ if __name__ == "__main__":
     # lr = 0.012234672196538655
     lr = None
     # lr_finetuning = 0.0005
-    momentum = 0.9 # (Krizhevsky et al.2012)
+    momentum = 0.9  # (Krizhevsky et al.2012)
     # wd = 0.0005 # (Krizhevsky et al.2012)
     # wd = 0.003593991109916679
     wd = None
     classes = 1
     # batch_size = 16
-    # batch_size = None
-    batch_size = 128 # tuning 1
-    num_folds = 4#9 # ranom-CV -> 1
-    min_delta = 0.01 # aka 1%
+    batch_size = None
+    # batch_size = 256 # tuning 1
+    num_folds = 4  # 9 # ranom-CV -> 1
+    min_delta = 0.01  # aka 1%
     patience = 10
     min_epochs = 2000
     duplicate_trainset_ntimes = 1
 
     # patch_no = 73
-    patch_no = 65
-    stride = 30 # 20 is too small
-    # architecture = 'baselinemodel'
+    patch_no = 76
+    stride = 30  # 20 is too small
+    architecture = 'baselinemodel'
     # architecture = 'densenet'
-    architecture = 'resnet18'
+    # architecture = 'resnet50'
     augmentation = True
     tune_fc_only = False
     pretrained = False
     features = 'RGB'
     # features = 'RGB+'
-    num_samples_per_fold = None # subsamples? -> None means do not subsample but take whole fold
-    validation_strategy = 'SCV_no_test' # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; SCV_no_test; RCV => Random Cross Validation
+    num_samples_per_fold = None  # subsamples? -> None means do not subsample but take whole fold
+    validation_strategy = 'SCV_no_test'  # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; SCV_no_test; RCV => Random Cross Validation
     # scv = False
     fake_labels = False
     # training_response_normalization = True
     training_response_normalization = False
+    # criterion = nn.MSELoss(reduction='mean')
     criterion = nn.L1Loss(reduction='mean')
 
-    this_output_dir = output_dirs[patch_no]+'_'+architecture+'_'+validation_strategy+'_L1_ALB_TR'+str(duplicate_trainset_ntimes)+'_E'+str(num_epochs)
+    this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + validation_strategy + '_L1_ALB_TR' + str(duplicate_trainset_ntimes) + '_E' + str(num_epochs)
     # this_output_dir = output_dirs[patch_no] + '_' + 'SSL' + '_' + validation_strategy + '_grn'
 
     # check if exists, -> error,
@@ -129,7 +133,7 @@ if __name__ == "__main__":
     if device == 'cpu':
         workers = os.cpu_count()
     else:
-        workers = 1#torch.cuda.device_count()
+        workers = 1  # torch.cuda.device_count()
         print('\twith {} workers'.format(workers))
 
     print('Setting up data in {}'.format(data_dirs[patch_no]))
@@ -147,10 +151,9 @@ if __name__ == "__main__":
     datamodule.prepare_data(num_samples=num_samples_per_fold)
 
     # for k in range(1):
-    for k in range(num_folds):
-        print('#'*60)
+    for k in range(3,num_folds):
+        print('#' * 60)
         print('Fold: {}'.format(k))
-
         # setup data according to folds
         # quadrants:
         # 0 1
@@ -182,77 +185,50 @@ if __name__ == "__main__":
             )
             # Bayesian Optimization HyperBand -> terminates bad trials + Bayesian Optimization
             bohb_search = TuneBOHB(metric='val_loss',
-                mode='min',
-                seed=seed,)
+                                   mode='min',
+                                   seed=seed, )
             bohb_search = tune.search.ConcurrencyLimiter(bohb_search, max_concurrent=4)
 
             tune_name = 'Tuning_{}_{}_all_bayes_L1_ALB_f{}_{}_TR{}'.format(architecture, validation_strategy, k, patch_no, duplicate_trainset_ntimes)
-            # analysis = tune.run(tune.with_parameters(
-            #                         TuneYieldRegressor,
-            #                         momentum=momentum,
-            #                         patch_no=patch_no,
-            #                         architecture=architecture,
-            #                         tune_fc_only=tune_fc_only,
-            #                         pretrained=pretrained,
-            #                         datamodule=datamodule,
-            #                         criterion=criterion,
-            #                         device=device,
-            #                         ),
-            #                     checkpoint_freq=10,
-            #                     max_failures=5,
-            #                     # stop={"training_iteration" : 20},
-            #                     config=param_space,
-            #                     resources_per_trial={"gpu": 2},
-            #                     metric='val_loss',
-            #                     mode='min',
-            #                     resume="AUTO",
-            #                     search_alg=algo,
-            #                     scheduler=bohb_hyperband,
-            #                     num_samples=20,
-            #                     stop={"training_iteration": 100},
-            #                     name=tune_name,
-            #                     local_dir=this_output_dir,
-            #                     )
             tuner = tune.Tuner(
-                                tune.with_resources(
-                                    tune.with_parameters(
-                                        TuneYieldRegressor,
-                                        momentum=momentum,
-                                        patch_no=patch_no,
-                                        architecture=architecture,
-                                        tune_fc_only=tune_fc_only,
-                                        pretrained=pretrained,
-                                        datamodule=datamodule,
-                                        # datamodule=dataloaders_dict,
-                                        criterion=criterion,
-                                        device=device,
-                                        workers=workers,
-                                        training_response_standardizer=datamodule.training_response_standardizer
-                                        ),
-                                    {"gpu": 1}),
-                                param_space=param_space,
-                                tune_config=tune.TuneConfig(
-                                metric='val_loss',
-                                mode='min',
-                                search_alg=bohb_search,
-                                scheduler=bohb_hyperband,
-                                num_samples=20,
-                                ),
-                                run_config=ray.air.config.RunConfig(
-                                # checkpoint_config=ray.air.config.CheckpointConfig(checkpoint_freq=10,),
-                                failure_config=ray.air.config.FailureConfig(max_failures=5),
-                                stop={"training_iteration": 100},
-                                name=tune_name,
-                                local_dir=this_output_dir,)
-                                )
+                tune.with_resources(
+                    tune.with_parameters(
+                        TuneYieldRegressor,
+                        momentum=momentum,
+                        patch_no=patch_no,
+                        architecture=architecture,
+                        tune_fc_only=tune_fc_only,
+                        pretrained=pretrained,
+                        datamodule=datamodule,
+                        # datamodule=dataloaders_dict,
+                        criterion=criterion,
+                        device=device,
+                        workers=workers,
+                        training_response_standardizer=datamodule.training_response_standardizer
+                    ),
+                    {"gpu": 1}),
+                param_space=param_space,
+                tune_config=tune.TuneConfig(
+                    metric='val_loss',
+                    mode='min',
+                    search_alg=bohb_search,
+                    scheduler=bohb_hyperband,
+                    num_samples=20,
+                ),
+                run_config=ray.air.config.RunConfig(
+                    # checkpoint_config=ray.air.config.CheckpointConfig(checkpoint_freq=10,),
+                    failure_config=ray.air.config.FailureConfig(max_failures=5),
+                    stop={"training_iteration": 100},
+                    name=tune_name,
+                    local_dir=this_output_dir, )
+            )
 
             # if k ==1:
             #     ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
             #     tuner.restore(path=os.path.join(this_output_dir,tune_name))
             # ray.init(_temp_dir='/beegfs/stiller/PatchCROP_all/tmp/ray')
             analysis = tuner.fit()
-            torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"),
-                       os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
+            torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"), os.path.join(this_output_dir, 'analysis_f{}.ray'.format(k)))
             best_result = analysis.get_best_result(metric="val_loss", mode="min")
             lr = best_result.config['lr']
             wd = best_result.config['wd']
@@ -284,7 +260,7 @@ if __name__ == "__main__":
                                           )
 
         # # Send the model to GPU
-        # if torch.cuda.device_count() > 1:
+        # if workers > 1:
         #     model_wrapper.model = nn.DataParallel(model_wrapper.model)
         model_wrapper.model.to(device)
 
