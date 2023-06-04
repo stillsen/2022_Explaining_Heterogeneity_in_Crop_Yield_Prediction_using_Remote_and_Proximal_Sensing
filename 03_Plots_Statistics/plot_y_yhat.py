@@ -35,14 +35,15 @@ input_files_rgb = dict()
 # data_root = '/beegfs/stiller/PatchCROP_all/Data/'
 data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
 # output_root = '/beegfs/stiller/PatchCROP_all/Output/'
-output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
+# output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
+output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/shuffle/L2/'
 # output_root = '/media/stiller/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
 
-output_dirs[65] = os.path.join(output_root, 'P_65_baselinemodel_SCV_no_test_L1_ALB_TR1_E2000')
-output_dirs[68] = os.path.join(output_root, 'P_68_baselinemodel_SCV_no_test_L1_ALB_TR1_E2000')
+output_dirs[65] = os.path.join(output_root, 'P_65_resnet18_SCV_no_test_L2_cycle_E1000')
+output_dirs[68] = os.path.join(output_root, 'P_68_resnet18_SCV_no_test_L2_cycle_E1000')
 # output_dirs[68] = os.path.join(output_root, 'P_68_resnet18_SCV_no_test_SSL_ALB_E2000')
 output_dirs[73] = os.path.join(output_root, 'P_73_ssl')
-output_dirs[76] = os.path.join(output_root, 'P_76_resnet18_SCV_no_test_TL-FC_L1_ALB_TR1_E2000')
+output_dirs[76] = os.path.join(output_root, 'P_76_baselinemodel_RCV_L2_cycle_E1000')
 
 # figure_path='/home/stillsen/Documents/GeoData/PatchCROP/AIA/Figures'
 
@@ -56,10 +57,20 @@ cmap = plt.cm.get_cmap('tab10', 9)
 # #encode cc in cmap
 colors = cmap(cc)
 
+# colors = ['#78C850',
+#           '#F08030',
+#           '#6890F0',
+#           '#A8B820',
+#           '#F8D030',
+#           '#E0C068',
+#           '#C03028',
+#           '#F85888',
+#           '#98D8D8']
+
 # patch_no = 73
-# patch_no = 65
-patch_no = 68
 # patch_no = 76
+patch_no = 68
+# patch_no = 68
 # test_patch_no = 90
 
 num_folds = 4
@@ -90,7 +101,7 @@ for s in sets:
     test_r = None
     if s == '_test_':
         '''
-        test set performance is the averaged model performance, i.e. mean prediction values
+        test set performance is the performance of the averaged model prediction, i.e. mean prediction values
         '''
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -108,7 +119,8 @@ for s in sets:
 
         y_hat = [prediction/4 for prediction in y_hat]
         # plot in combined figure
-        ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
+        # ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
+        ax.scatter(x=y_hat, y=y, marker='.', c=colors[5], alpha=0.8)
 
         test_r2 = np.mean(sklearn.metrics.r2_score(y, y_hat))
         test_r = np.corrcoef(y, y_hat)[0,1]
@@ -119,10 +131,10 @@ for s in sets:
         ax.set_ylabel('Y [dt/ha]', fontsize=16)
 
         fig.tight_layout()
-        lim = [min(ax.get_ylim()[0], ax.get_xlim()[0]),
-               max(ax.get_ylim()[1], ax.get_xlim()[1])]
+        # lim = [min(ax.get_ylim()[0], ax.get_xlim()[0]),
+        #        max(ax.get_ylim()[1], ax.get_xlim()[1])]
         # ax.set_xlim([-100,100])
-        ax.set_ylim(lim)
+        # ax.set_ylim(lim)
 
         fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_average' + s[:-1] + '.png'))
 
@@ -150,17 +162,19 @@ for s in sets:
             global_y.extend(y)
             global_y_hat.extend(y_hat)
             # save local prediction performances y and y_hat globally
-            local_r2.append(sklearn.metrics.r2_score(y, y_hat))
-            local_r.append(np.corrcoef(y, y_hat))
+            r2 = sklearn.metrics.r2_score(y, y_hat)
+            r = np.corrcoef(y, y_hat)[0,1]
+            local_r2.append(r2)
+            local_r.append(r)
 
             # plot in combined figure
             ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
 
         avg_local_r2 = np.mean(local_r2)
         glogal_r2 = sklearn.metrics.r2_score(y_true=global_y, y_pred=global_y_hat)
-        global_r = np.corrcoef(global_y, global_y_hat)
+        global_r = np.corrcoef(global_y, global_y_hat)[0,1]
 
-        ax.set_title('global ' + r'$R^{2} = $' + str(glogal_r2)[:4] + ', global r = ' + str(global_r[0, 1])[:4]+ '\n local ' + r'$R^{2} = $' + str(avg_local_r2)[:4]  + ', local r = ' + str(np.mean(local_r))[:4], fontsize=16)
+        ax.set_title('global ' + r'$R^{2} = $' + str(glogal_r2)[:4] + ', global r = ' + str(global_r)[:4]+ '\n local ' + r'$R^{2} = $' + str(avg_local_r2)[:4]  + ', local r = ' + str(np.mean(local_r))[:4], fontsize=16)
         ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
         ax.set_ylabel('Y [dt/ha]', fontsize=16)
 
@@ -176,7 +190,7 @@ for s in sets:
         df = pd.DataFrame({'global_r2': [str(glogal_r2)[:4]],
                            'local_r2_median': [np.median(local_r2)],
                            'local_r2_mean': [str(avg_local_r2)[:4]],
-                           'global_r':[str(global_r[0, 1])[:4]],
+                           'global_r':[str(global_r)[:4]],
                            'local_r_median':[str(np.median(local_r))[:4]],
                            'local_r_mean':[str(np.mean(local_r))[:4]],
                            })
@@ -191,7 +205,7 @@ for s in sets:
         y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s + str(k) + '.pt'))
 
         local_r2 = sklearn.metrics.r2_score(y, y_hat)
-        local_r = np.corrcoef(y, y_hat)
+        local_r = np.corrcoef(y, y_hat)[0,1]
 
         # plot in separate figure
         fig = plt.figure(k)
@@ -201,7 +215,7 @@ for s in sets:
 
         ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
 
-        ax.set_title('local ' + r'$R^{2} = $' + str(local_r2)[:4] + ', local r = ' + str(local_r[0,1])[:4], fontsize=16)
+        ax.set_title('local ' + r'$R^{2} = $' + str(local_r2)[:4] + ', local r = ' + str(local_r)[:4], fontsize=16)
         ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
         ax.set_ylabel('Y [dt/ha]', fontsize=16)
 

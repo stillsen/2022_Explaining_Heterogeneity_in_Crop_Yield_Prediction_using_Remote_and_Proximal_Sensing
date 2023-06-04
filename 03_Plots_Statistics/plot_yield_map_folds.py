@@ -20,10 +20,11 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 # Own modules
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("PatchCROPDataModule", "/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Source/02_DL/PatchCROPDataModule.py")
-foo = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(foo)
+from PatchCROPDataModule import PatchCROPDataModule
+# import importlib.util
+# spec = importlib.util.spec_from_file_location("PatchCROPDataModule", "/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Source/02_DL/PatchCROPDataModule.py")
+# foo = importlib.util.module_from_spec(spec)
+# spec.loader.exec_module(foo)
 
 
 __author__ = 'Stefan Stiller'
@@ -44,10 +45,10 @@ if __name__ == "__main__":
     input_files = dict()
     input_files_rgb = dict()
 
-    # data_root = '/beegfs/stiller/PatchCROP_all/Data/'
-    data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
-    # output_root = '/beegfs/stiller/PatchCROP_all/Output/'
-    output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
+    data_root = '/beegfs/stiller/PatchCROP_all/Data/'
+    # data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
+    output_root = '/beegfs/stiller/PatchCROP_all/Output/'
+    # output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
 
     ## Patch 12
     output_dirs[12] = os.path.join(output_root,'Patch_ID_12')
@@ -59,13 +60,34 @@ if __name__ == "__main__":
                        }
     input_files_rgb[12] = {'pC_col_2020_plant_PS412_Pha_smc_Krig.tif': ['Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_12.tif']}
 
+    ## Patch 68
+    output_dirs[68] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_baselinemodel_augmented_fakelabels_tunedhyperparams')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_fixhyperparams')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_68_RGB_densenet_augmented_fakelabels_tunedhyperparams')
+
+    data_dirs[68] = os.path.join(data_root, 'Patch_ID_68')
+    # data_dirs[73] = os.path.join(data_root, 'Patch_ID_68_NDVI')
+
+    # input_files[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg_sequ_11062020_dsm_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_sequ_11062020_index_ndvi_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_sequ_11062020_transparent_reflectance_merged_aligned_Patch_ID_73.tif',
+    #                                                                   'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_73.tif']
+    #                    }
+    input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif']}
+    # input_files_rgb[73] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_68.tif',
+    #                                                                       'Tempelberg_sequ_16072020_index_ndvi_aligned_Patch_ID_68.tif',
+    #                                                                       ]}
+
 
     ## Patch 73
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB+_densenet_augmented_custom')
-    output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_not_augmented_custom_btf_s1000')
+    # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_not_augmented_custom_btf_s1000')
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_not_augmented_custom_btf_s3000')
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_densenet_augmented_custom_s2000')
     # output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_densenet')
+
+    output_dirs[73] = os.path.join(output_root, 'Patch_ID_73_RGB_baselinemodel_augmented_fakelabels_fixhyperparams')
 
     # data_dirs[73] = os.path.join(data_root, 'Patch_ID_73_0307')
     data_dirs[73] = os.path.join(data_root, 'Patch_ID_73')
@@ -150,8 +172,25 @@ if __name__ == "__main__":
 
     this_output_dir = output_dirs[patch_no]
 
-    datamodule = foo.PatchCROPDataModule(input_files=input_files_rgb[patch_no], data_dir=data_dirs[patch_no], stride=10, workers=os.cpu_count(), augmented=augmentation, batch_size=1)
-    datamodule.prepare_data(num_samples=num_samples_per_fold)
+    datamodule = PatchCROPDataModule(input_files=input_files_rgb[patch_no], patch_id=patch_no, data_dir=data_dirs[patch_no], stride=stride, workers=os.cpu_count(), augmented=augmentation, input_features=features, batch_size=batch_size)
+
+    checkpoint_paths = ['model_f0.ckpt',
+                        'model_f1.ckpt',
+                        'model_f2.ckpt',
+                        'model_f3.ckpt',
+                        'model_f4.ckpt',
+                        'model_f5.ckpt',
+                        'model_f6.ckpt',
+                        'model_f7.ckpt',
+                        'model_f8.ckpt',
+                        ]
+    checkpoint_paths = [output_dirs[patch_no]+'/'+cp for cp in checkpoint_paths]
+
+    if num_samples_per_fold == None:
+        datamodule.prepare_data(num_samples=num_samples_per_fold)
+    else:
+        datamodule.load_subsamples(num_samples=num_samples_per_fold)
+
 
     fold_starts_x = [0, 774, 1548]
     fold_length_x = 774
@@ -176,19 +215,19 @@ if __name__ == "__main__":
 
             if y==0 and x==0:
                 fold_idx = 0
-            elif y == 0 and x == 1:
-                fold_idx = 1
-            elif y == 0 and x == 2:
-                fold_idx = 2
             elif y == 1 and x == 0:
+                fold_idx = 1
+            elif y == 2 and x == 0:
+                fold_idx = 2
+            elif y == 0 and x == 1:
                 fold_idx = 3
             elif y == 1 and x == 1:
                 fold_idx = 4
-            elif y == 1 and x == 2:
-                fold_idx = 5
-            elif y == 2 and x == 0:
-                fold_idx = 6
             elif y == 2 and x == 1:
+                fold_idx = 5
+            elif y == 0 and x == 2:
+                fold_idx = 6
+            elif y == 1 and x == 2:
                 fold_idx = 7
             elif y == 2 and x == 2:
                 fold_idx = 8
@@ -246,7 +285,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     # # plt.xticks([origin[0], end[0]])
     # # plt.yticks([origin[1], end[1]])
-    plt.savefig(os.path.join(this_output_dir, 'yield_map_folds.png'))
+    plt.savefig(os.path.join(this_output_dir, 'yield_map_folds_2.png'))
     # plt.show()
 
 

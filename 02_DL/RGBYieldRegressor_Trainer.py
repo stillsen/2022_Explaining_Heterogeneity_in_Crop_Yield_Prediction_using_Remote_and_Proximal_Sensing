@@ -248,41 +248,6 @@ class RGBYieldRegressor:
     def set_criterion(self, criterion=nn.L1Loss(reduction='mean')):
         self.criterion = criterion
 
-    # def tune_step(self):
-    #     '''
-    #     1 epoch training
-    #     '''
-    #     phase = 'train'
-    #     running_loss = 0.0
-    #     epoch_loss = 0.0
-    #
-    #     # Set model to training mode
-    #     self.model.train()
-    #
-    #     # Iterate over data.
-    #     for inputs, labels in self.dataloaders[phase]:
-    #         inputs = inputs.to(self.device)
-    #         labels = labels.to(self.device)
-    #         # zero the parameter gradients
-    #         self.optimizer.zero_grad()
-    #         # forward
-    #         with torch.set_grad_enabled(phase == 'train'):
-    #             # make prediction
-    #             outputs = self.model(inputs)
-    #             # compute loss
-    #             loss = self.criterion(torch.flatten(outputs), labels.data)
-    #             # accumulate gradients
-    #             loss.backward()
-    #             # update parameters
-    #             self.optimizer.step()
-    #             if self.scheduler is not None:
-    #                 self.scheduler.step()
-    #         # statistics
-    #         running_loss += loss.item() * inputs.size(0)
-    #
-    #     epoch_loss = running_loss / len(self.dataloaders[phase].dataset)
-    #     print('{} Loss: {:.4f}'.format(phase, epoch_loss))
-    #     return epoch_loss
 
     def train(self):
         '''
