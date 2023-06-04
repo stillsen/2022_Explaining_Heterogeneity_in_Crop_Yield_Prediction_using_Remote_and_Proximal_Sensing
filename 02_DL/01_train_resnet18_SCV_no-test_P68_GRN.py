@@ -27,7 +27,7 @@ from torch import nn
 import warnings
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule
-from RGBYieldRegressor import RGBYieldRegressor
+from RGBYieldRegressor_Trainer import RGBYieldRegressor_Trainer
 from TuneYieldRegressor import TuneYieldRegressor
 
 from directory_listing import output_dirs, data_dirs, input_files_rgb
@@ -272,18 +272,18 @@ if __name__ == "__main__":
                             # 'test': datamodule.test_dataloader(),
                             }
         start_timer()
-        model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
-                                          device=device,
-                                          lr=lr,
-                                          momentum=momentum,
-                                          wd=wd,
-                                          # k=num_folds,
-                                          pretrained=pretrained,
-                                          tune_fc_only=tune_fc_only,
-                                          model=architecture,
-                                          training_response_standardizer=datamodule.training_response_standardizer,
-                                          criterion=criterion,
-                                          )
+        model_wrapper = RGBYieldRegressor_Trainer(dataloaders=dataloaders_dict,
+                                                  device=device,
+                                                  lr=lr,
+                                                  momentum=momentum,
+                                                  wd=wd,
+                                                  # k=num_folds,
+                                                  pretrained=pretrained,
+                                                  tune_fc_only=tune_fc_only,
+                                                  architecture=architecture,
+                                                  training_response_standardizer=datamodule.training_response_standardizer,
+                                                  criterion=criterion,
+                                                  )
 
         # # Send the model to GPU
         # if torch.cuda.device_count() > 1:
@@ -292,11 +292,11 @@ if __name__ == "__main__":
 
         # Train and evaluate
         print('training for {} epochs'.format(num_epochs))
-        model_wrapper.train_model(patience=patience,
-                                  min_delta=min_delta,
-                                  num_epochs=num_epochs,
-                                  min_epochs=min_epochs,
-                                  )
+        model_wrapper.train(patience=patience,
+                            min_delta=min_delta,
+                            num_epochs=num_epochs,
+                            min_epochs=min_epochs,
+                            )
         run_time = end_timer_and_get_time('\nEnd training for fold {}'.format(k))
         # save best model
         torch.save(model_wrapper.model.state_dict(), os.path.join(this_output_dir, 'model_f' + str(k) + '.ckpt'))

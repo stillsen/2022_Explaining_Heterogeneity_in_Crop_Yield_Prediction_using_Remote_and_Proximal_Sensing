@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule#, KFoldLoop#, SpatialCVModel
-from RGBYieldRegressor import RGBYieldRegressor
+from RGBYieldRegressor_Trainer import RGBYieldRegressor_Trainer
 # from MC_YieldRegressor import MCYieldRegressor
 from directory_listing import output_dirs, data_dirs, input_files_rgb
 
@@ -41,10 +41,11 @@ __status__ = 'Dev'
 
 
 if __name__ == "__main__":
-    # seed_everything(42)
-    torch.manual_seed(42)
-    random.seed(42)
-    np.random.seed(42)
+    seed = 42
+    # seed_everything(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
     ## HYPERPARAMETERS
     num_epochs = 200
@@ -62,24 +63,29 @@ if __name__ == "__main__":
     min_epochs = 200
     repeat_trainset_ntimes = 1
 
-    patch_no = 76
+    # patch_no = 76
     # patch_no = 65
-    # patch_no = 68
-    # test_patch_no = None
+    patch_no = 68
+    # test_patch_no = 58
     # test_patch_no = 19
-    test_patch_no = 95
+    # test_patch_no = 95
+    test_patch_no = 90
     stride = 30 # 20 is too small
-    architecture = 'baselinemodel'
+    # architecture = 'baselinemodel'
     # architecture = 'densenet'
     # architecture = 'short_densenet'
-    # architecture = 'resnet18'
+    architecture = 'resnet18'
     augmentation = False
     tune_fc_only = True
     pretrained = False
     features = 'RGB'
     # features = 'RGB+'
     num_samples_per_fold = None
-    validation_strategy = 'SCV_no_test'
+    # validation_strategy = 'RCV'
+    validation_strategy = 'SCV_no_test'  # SHOV => Spatial Hold Out Validation; SCV => Spatial Cross Validation; SCV_no_test; RCV => Random Cross Validation
+
+    #criterion = nn.L1Loss(reduction='mean')
+    criterion = nn.MSELoss(reduction='mean')
     # scv = False
 
     fake_labels = False
@@ -97,12 +103,15 @@ if __name__ == "__main__":
 
     # model_name = output_dirs[patch_no].split('/')[-1]
 
-    this_output_dir = output_dirs[patch_no] + '_baselinemodel_SCV_no_test_L1_ALB_TR1_E2000'
+    this_output_dir = output_dirs[patch_no] + '_resnet18_SCV_no_test_SSL_L2_cycle_E1000_resetW'
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     datamodule = PatchCROPDataModule(input_files=input_files_rgb[test_patch_no],
                                      patch_id=test_patch_no,
+                                     this_output_dir=this_output_dir,
+                                     seed=seed,
                                      data_dir=data_dirs[test_patch_no],
                                      stride=stride,
                                      workers=workers,
@@ -112,7 +121,7 @@ if __name__ == "__main__":
                                      validation_strategy=validation_strategy,
                                      fake_labels=fake_labels,
                                      )
-
+    datamodule.prepare_data(num_samples=num_samples_per_fold)
     checkpoint_paths = ['model_f0.ckpt',
                         'model_f1.ckpt',
                         'model_f2.ckpt',
@@ -125,11 +134,6 @@ if __name__ == "__main__":
                             'model_f3_domain-tuning.ckpt',
                             ]
     checkpoint_paths = [this_output_dir+'/'+cp for cp in checkpoint_paths]
-
-    if num_samples_per_fold == None:
-        datamodule.prepare_data(num_samples=num_samples_per_fold)
-    else:
-        datamodule.load_subsamples(num_samples=num_samples_per_fold)
 
     sets = [
         # 'train',
@@ -158,28 +162,35 @@ if __name__ == "__main__":
                                 }
 
             # set up model wrapper and input data
-            model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
-                                              device=device,
-                                              lr=lr,
-                                              momentum=momentum,
-                                              wd=wd,
-                                              # k=num_folds,
-                                              pretrained=pretrained,
-                                              tune_fc_only=tune_fc_only,
-                                              model=architecture,
-                                              training_response_standardizer=datamodule.training_response_standardizer
-                                              )
+            model_wrapper = RGBYieldRegressor_Trainer(
+                pretrained=pretrained,
+                tune_fc_only=tune_fc_only,
+                architecture=architecture,
+                criterion=criterion,
+                device=device,
+                workers=workers
+            )
+            # set dataloaders
+            model_wrapper.set_dataloaders(dataloaders=dataloaders_dict)
+            # load weights and skip rest of the method if already trained
+            model_wrapper.load_model_if_exists(model_dir=this_output_dir, strategy=None, k=k)
 
             # load trained model weights with respect to possible parallelization and device
-            if torch.cuda.is_available():
-                state_dict = torch.load(checkpoint_paths[k])
-            else:
-                state_dict = torch.load(checkpoint_paths[k], map_location=torch.device('cpu'))
-            if workers > 1:
-                model_wrapper.model = nn.DataParallel(model_wrapper.model)
+            # if torch.cuda.is_available():
+            #     state_dict = torch.load(checkpoint_paths[k])
+            # else:
+            #     state_dict = torch.load(checkpoint_paths[k], map_location=torch.device('cpu'))
+            # if workers > 1:
+            #     model_wrapper.model = nn.DataParallel(model_wrapper.model)
+            #
+            # state_dict_revised = OrderedDict()
+            # for key, value in state_dict.items():
+            #     revised_key = key.replace("module.", "")
+            #     state_dict_revised[revised_key] = value
+            #
+            # state_dict_revised = state_dict
+            # model_wrapper.model.load_state_dict(state_dict_revised)
 
-            state_dict_revised = state_dict
-            model_wrapper.model.load_state_dict(state_dict_revised)
 
             # make prediction
             # for each fold store labels and predictions

@@ -67,39 +67,6 @@ class BaselineModel(nn.Module):
             ('fc_8', nn.Linear(in_features=1024, out_features=1))
             # ('fc_9', nn.Linear(in_features=1024, out_features=1))
             ]))
-        # self.regressor = nn.Sequential(OrderedDict([
-        #     ('fc_7', nn.Linear(in_features=5 * 5 * 128, out_features=1024)),
-        #     ('relu_7', nn.ReLU(inplace=True)),
-        #     ('fc_8', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_8', nn.ReLU(inplace=True)),
-        #     ('fc_9', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_9', nn.ReLU(inplace=True)),
-        #     ('fc_10', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_10', nn.ReLU(inplace=True)),
-        #     ('fc_11', nn.Linear(in_features=1024, out_features=1))
-        # ]))
-        # self.regressor = nn.Sequential(OrderedDict([
-        #     ('fc_7', nn.Linear(in_features=5 * 5 * 128, out_features=1024)),
-        #     ('relu_7', nn.ReLU(inplace=True)),
-        #     ('fc_8', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_8', nn.ReLU(inplace=True)),
-        #     ('fc_9', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_9', nn.ReLU(inplace=True)),
-        #     ('fc_10', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_10', nn.ReLU(inplace=True)),
-        #     ('fc_11', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_11', nn.ReLU(inplace=True)),
-        #     ('fc_12', nn.Linear(in_features=1024, out_features=1024)),
-        #     ('relu_12', nn.ReLU(inplace=True)),
-        #     ('fc_13', nn.Linear(in_features=1024, out_features=1))
-        # ]))
-
-    # def weights_init(self, m):
-    #     if isinstance(m, nn.Linear):
-    #         nn.init.xavier_uniform_(self.regressor..weight)
-    #         nn.init.xavier_uniform_(self.linear2.weight)
-    #         xavier(m.weight.data)
-    #         xavier(m.bias.data)
 
     def forward(self, x:torch.Tensor) -> torch.Tensor:
         out = x

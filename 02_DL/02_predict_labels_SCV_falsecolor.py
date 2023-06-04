@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule#, KFoldLoop#, SpatialCVModel
-from RGBYieldRegressor import RGBYieldRegressor
+from RGBYieldRegressor_Trainer import RGBYieldRegressor_Trainer
 # from MC_YieldRegressor import MCYieldRegressor
 from directory_listing import output_dirs, data_dirs, input_files_rgb
 
@@ -192,17 +192,17 @@ if __name__ == "__main__":
                                 }
 
             # set up model wrapper and input data
-            model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
-                                              device=device,
-                                              lr=lr,
-                                              momentum=momentum,
-                                              wd=wd,
-                                              # k=num_folds,
-                                              pretrained=pretrained,
-                                              tune_fc_only=tune_fc_only,
-                                              model=architecture,
-                                              training_response_standardizer=datamodule.training_response_standardizer
-                                              )
+            model_wrapper = RGBYieldRegressor_Trainer(dataloaders=dataloaders_dict,
+                                                      device=device,
+                                                      lr=lr,
+                                                      momentum=momentum,
+                                                      wd=wd,
+                                                      # k=num_folds,
+                                                      pretrained=pretrained,
+                                                      tune_fc_only=tune_fc_only,
+                                                      architecture=architecture,
+                                                      training_response_standardizer=datamodule.training_response_standardizer
+                                                      )
 
             # load trained model weights with respect to possible parallelization and device
             if torch.cuda.is_available():

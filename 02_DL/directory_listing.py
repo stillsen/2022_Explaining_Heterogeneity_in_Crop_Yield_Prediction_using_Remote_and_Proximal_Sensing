@@ -9,7 +9,7 @@ input_files_rgb = dict()
 
 data_root = '/beegfs/stiller/PatchCROP_all/Data/'
 # data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
-output_root = '/beegfs/stiller/PatchCROP_all/Output/'
+output_root = '/beegfs/stiller/PatchCROP_all/Output/L2/'
 # output_root = '../../Output/'
 
 # ## Patch 12
