@@ -32,16 +32,26 @@ __status__ = 'Dev'
 
 
 # path of root directory of multi-spectral images (MSI)
-root = '../../1_Data_working_copy/MSI/'
+root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/1_Data_working_copy/MSI/2021/'
 # path to sub directory
-sub_dir = '4_index/reflectance/'
+# sub_dir = '4_index/reflectance/'
+sub_dir = ''
 # reference root directory name
-reference_dir = 'pC_col_plant_drone_Multi_20200617'
+# reference_dir = 'pC_col_plant_drone_Multi_20200617'
+reference_dir = 'Tempelberg_Haupt_AriaX-Sequ_06072021'
 # channels in reference image,
-reference_files = ['Tempelberg_sequ_17062020_transparent_reflectance_green.tif',
-                         'Tempelberg_sequ_17062020_transparent_reflectance_rededge.tif',
-                         'Tempelberg_sequ_17062020_transparent_reflectance_nir.tif',
-                         'Tempelberg_sequ_17062020_transparent_reflectance_red.tif']
+reference_files = [
+                         'Tempelberg_AriaX_06072021_Haupt_transparent.tif',
+                         'Tempelberg_Haupt_Sequ_06072021_transparent_reflectance_green.tif',
+                         'Tempelberg_Haupt_Sequ_06072021_transparent_reflectance_nir.tif',
+                         'Tempelberg_Haupt_Sequ_06072021_transparent_reflectance_red.tif',
+                         'Tempelberg_Haupt_Sequ_06072021_transparent_reflectance_rededge.tif',
+                   ]
+# reference_files = ['Tempelberg_sequ_16072020_transparent_reflectance_green.tif',
+#                          'Tempelberg_sequ_16072020_transparent_reflectance_rededge.tif',
+#                          'Tempelberg_sequ_16072020_transparent_reflectance_nir.tif',
+#                          # 'Tempelberg_sequ_17062020_transparent_reflectance_red.tif',
+#                    ]
 # sort order of bands
 bands = ['green', 'nir', 'red', 'rededge']
 
@@ -49,7 +59,8 @@ bands = ['green', 'nir', 'red', 'rededge']
 # assumption: given a date all channels within an image are aligned
 # thus, we need to align the whole image rather than each channel separately
 # merge reference image, if not exist
-reference_merge_file = 'Tempelberg_sequ_17062020_transparent_reflectance_merged.tif'
+# reference_merge_file = 'Tempelberg_sequ_17062020_transparent_reflectance_merged_green_nir_re.tif'
+reference_merge_file = 'Tempelberg_AriaX_06072021_Haupt_transparent_merged.tif'
 reference_merge_file_abs = os.path.join(root, reference_dir, sub_dir, reference_merge_file)
 if not os.path.isfile(reference_merge_file_abs):
     print('merging channels of {}'.format(reference_merge_file_abs))
@@ -77,13 +88,14 @@ if not os.path.exists(alignment_path):
 # merge target channels of images, compute alignment of target to reference image and align
 for dir in os.listdir(root):
     dir = os.fsdecode(dir)
-    if dir != reference_dir and dir != 'Aligned_Raster_Maps':
+    # if dir != reference_dir and dir != 'Aligned_Raster_Maps':
+    if dir != 'Aligned_Raster_Maps':
         # get all tif files in directory
         files = os.listdir(os.path.join(root, dir, sub_dir))
         files = [x for x in files if '.tif' in x]
         # we don't want to use blue and RGB, as these bands are only available for two drone flights
         files = [x for x in files if not 'blue' in x]
-        files = [x for x in files if not 'RGB' in x]
+        # files = [x for x in files if not 'RGB' in x]
         # also ignore DSM and NDVI at this stage and process later
         files = [x for x in files if not 'ndvi' in x]
         files = [x for x in files if not 'dsm' in x]
@@ -126,19 +138,19 @@ for dir in os.listdir(root):
             CR.correct_shifts()
 
 
-            # apply same alignment to ndvi and dsm
-            target_merge_file = target_file.rsplit('_', 3)[0] + '_index_ndvi.tif'
-            out_file = os.path.join(alignment_path,target_file.rsplit('_', 3)[0] + '_index_ndvi_aligned.tif')
-            print('Aligning {target_file}'.format(target_file=target_merge_file))
-            print('writing to {out_file}'.format(out_file=out_file))
-            target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
-            DESHIFTER(target_merge_file_abs, CR.coreg_info, path_out=out_file,band2process=1).correct_shifts()
-
-            target_merge_file = target_file.rsplit('_', 3)[0]+'_dsm.tif'
-            out_file = os.path.join(alignment_path,target_file.rsplit('_', 3)[0]+'_dsm_aligned.tif')
-            print('Aligning {target_file}'.format(target_file=target_merge_file))
-            target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
-            DESHIFTER(target_merge_file_abs, CR.coreg_info, path_out=out_file,band2process=1).correct_shifts()
+            # # apply same alignment to ndvi and dsm
+            # target_merge_file = target_file.rsplit('_', 3)[0] + '_index_ndvi.tif'
+            # out_file = os.path.join(alignment_path,target_file.rsplit('_', 3)[0] + '_index_ndvi_aligned.tif')
+            # print('Aligning {target_file}'.format(target_file=target_merge_file))
+            # print('writing to {out_file}'.format(out_file=out_file))
+            # target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
+            # DESHIFTER(target_merge_file_abs, CR.coreg_info, path_out=out_file,band2process=1).correct_shifts()
+            #
+            # target_merge_file = target_file.rsplit('_', 3)[0]+'_dsm.tif'
+            # out_file = os.path.join(alignment_path,target_file.rsplit('_', 3)[0]+'_dsm_aligned.tif')
+            # print('Aligning {target_file}'.format(target_file=target_merge_file))
+            # target_merge_file_abs = os.path.join(root, dir, sub_dir, target_merge_file)
+            # DESHIFTER(target_merge_file_abs, CR.coreg_info, path_out=out_file,band2process=1).correct_shifts()
         else: # RGB, does not need to be merged, but aligned directly
             files_abs = [os.path.join(root, dir, sub_dir, x) for x in files]
             # calculating alignment and perform shift for bands
@@ -152,9 +164,9 @@ for dir in os.listdir(root):
 
 # move merged reference file to alignment path
 reference_path = os.path.join(root, reference_dir, sub_dir)
-shutil.copyfile(os.path.join(reference_path, reference_merge_file), os.path.join(reference_path, reference_merge_file.split('.')[0]+'_aligned.tif'))
-shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm_aligned.tif'))
-shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi_aligned.tif')
+shutil.copyfile(os.path.join(reference_path, reference_merge_file), os.path.join(reference_path, reference_merge_file.split('.')[0]+'_aligned_gnr.tif'))
+# shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_dsm_aligned.tif'))
+# shutil.copyfile(os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi.tif'), os.path.join(reference_path, 'Tempelberg_sequ_17062020_index_ndvi_aligned.tif')
 # files = os.listdir(reference_path)
 # aligment_files = [file for file in files if 'aligned' in file]
 # for aligment_file in aligment_files:

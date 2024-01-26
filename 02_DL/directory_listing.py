@@ -7,10 +7,13 @@ data_dirs = dict()
 input_files = dict()
 input_files_rgb = dict()
 
-data_root = '/beegfs/stiller/PatchCROP_all/Data/'
-# data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
-output_root = '/beegfs/stiller/PatchCROP_all/Output/L2/'
-# output_root = '../../Output/'
+# data_root = '/beegfs/stiller/PatchCROP_all/Data/'
+data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
+# output_root = '/beegfs/stiller/PatchCROP_all/Output/L2/'
+# output_root = '/beegfs/stiller/PatchCROP_all/Output/L2/SSL/'
+# output_root = '/beegfs/stiller/PatchCROP_all/Output/L2/SSL/Tests/'
+# output_root = '../../Output/SSL/'
+output_root = '../../Output/SSL/Tests'
 
 # ## Patch 12
 # output_dirs[12] = os.path.join(output_root, 'P_12')
@@ -62,6 +65,16 @@ output_dirs[19] = os.path.join(output_root, 'P_19')
 data_dirs[19] = os.path.join(data_root, 'Patch_ID_19')
 input_files_rgb[19] = {'pC_col_2020_plant_PS419_Soy_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_19.tif']}
 
+## Combined Test
+output_dirs['combined_test'] = os.path.join(output_root, 'Combined_crops_test')
+data_dirs['combined_test'] = os.path.join(data_root, 'Combined_crops_test')
+input_files_rgb['combined_test'] = { '' : ['']}
+
+## Combined Train
+output_dirs['combined_train'] = os.path.join(output_root, 'Combined_crops_train')
+data_dirs['combined_train'] = os.path.join(data_root, 'Combined_crops_train')
+input_files_rgb['combined_train'] = { '' : ['']}
+
 ## Patch 65
 output_dirs[65] = os.path.join(output_root, 'P_65')
 data_dirs[65] = os.path.join(data_root, 'Patch_ID_65')
@@ -81,6 +94,11 @@ input_files_rgb[68] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg
 output_dirs['68_grn'] = os.path.join(output_root, 'P_68')
 data_dirs['68_grn'] = os.path.join(data_root, 'Patch_ID_68_grn')
 input_files_rgb['68_grn'] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg_sequ_16072020_transparent_reflectance_merged_green_nir_re_Patch_ID_68.tif']}
+
+## Patch 68
+output_dirs['68_hgrn'] = os.path.join(output_root, 'P_68')
+data_dirs['68_hgrn'] = os.path.join(data_root, 'Patch_ID_68_grn')
+input_files_rgb['68_hgrn'] = {'pC_col_2020_plant_PS468_Maiz_smc_Krig.tif': ['Tempelberg_soda3-sequ_16072020_transparent_reflectance_merged_hrGreen_nir_re_Patch_ID_68.tif']}
 
 # ## Patch 73
 # output_dirs[73] = os.path.join(output_root, 'P_73')
@@ -118,6 +136,16 @@ input_files_rgb[76] = {'pC_col_2020_plant_PS476_Sun_smc_Krig.tif': ['Tempelberg1
 output_dirs[90] = os.path.join(output_root, 'P_90')
 data_dirs[90] = os.path.join(data_root, 'Patch_ID_90')
 input_files_rgb[90] = {'pC_col_2020_plant_PS490_Maiz_smc_Krig.tif': ['Tempelberg1_soda3_06082020_transparent_mosaic_group1_merged_aligned_Patch_ID_90.tif']}
+
+## Patch 90
+output_dirs['90_grn'] = os.path.join(output_root, 'P_90')
+data_dirs['90_grn'] = os.path.join(data_root, 'Patch_ID_90_grn')
+input_files_rgb['90_grn'] = {'pC_col_2020_plant_PS490_Maiz_smc_Krig.tif': ['Tempelberg_sequ_16072020_transparent_reflectance_merged_upsampled_green_nir_re_Patch_ID_90.tif']}
+## Patch 90
+output_dirs['90_hgrn'] = os.path.join(output_root, 'P_90')
+data_dirs['90_hgrn'] = os.path.join(data_root, 'Patch_ID_90_grn')
+input_files_rgb['90_hgrn'] = {'pC_col_2020_plant_PS490_Maiz_smc_Krig.tif': ['Tempelberg_soda3-sequ_16072020_transparent_reflectance_merged_hrGreen_nir_re_Patch_ID_90.tif']}
+
 
 ## Patch 95
 output_dirs[95] = os.path.join(output_root, 'P_95')

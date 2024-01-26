@@ -25,7 +25,11 @@ __status__ = 'Dev'
 
 flowerstrip_patch_ids = ['12', '13', '19', '20', '21', '105', '110', '114', '115', '119']
 
-root = '../../1_Data_working_copy/MSI/Aligned_Raster_Maps'
+# root = '../../1_Data_working_copy/MSI/Aligned_Raster_Maps'
+# root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/1_Data_working_copy/MSI/pC_col_plant_drone_RGB3D_20200703/4_index/reflectance'
+# root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/1_Data_working_copy/MSI/pC_col_plant-drone_RGB3D_20200806/4_index/reflectance'
+# root = '/media/stillsen/Samsung_T5/pC2021/Tempelberg_AriaX_06072021_Haupt/3_dsm_ortho/2_mosaic/'
+root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/1_Data_working_copy/MSI/Tempelberg_Haupt_Sequ_06072021/'
 
 # for every every landscape file in folder....
 landscape_files = [file for file in os.listdir(root) if file.endswith('tif')]

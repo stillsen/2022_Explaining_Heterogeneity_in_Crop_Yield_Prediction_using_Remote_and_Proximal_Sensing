@@ -15,12 +15,12 @@ output_root = '../../Output/shuffle/L2/'
 # output_dir = '/beegfs/stiller/PatchCROP_all/Output/Patch_ID_73_RGB_densenet_augmented_fakelabels_tunedhyperparams_all'
 # output_dir = '/beegfs/stiller/PatchCROP_all/Output/Patch_ID_73_RGB_baselinemodel_augmented_raytuning'
 output_dirs = [
-    # 'P_68_resnet18_SCV_RCV',
+    'P_68_resnet18_SCV_RCV',
     # 'P_65_resnet18_SCV_RCV',
     # 'P_76_resnet18_SCV_RCV',
     # 'P_68_baselinemodel_SCV_RCV',
     # 'P_65_baselinemodel_SCV_RCV',
-    'P_76_baselinemodel_SCV_RCV',
+    # 'P_76_baselinemodel_SCV_RCV',
               ]
 output_dirs = [os.path.join(output_root, f) for f in output_dirs]
 
@@ -77,8 +77,8 @@ for cv in ['_RCV', '_SCV']:
                 # pref = 'domain_'
 
                 if 'L2' in output_dirs[0]:
-                    df['val_loss'] = df['val_loss']**(1/2)
-                    df['train_loss'] = df['train_loss'] ** (1/2)
+                    df['val_loss'] = (df['val_loss']**(1/2))*0.1 # times 0.1 to convert from dt/ha to t/ha
+                    df['train_loss'] = (df['train_loss'] ** (1/2))*0.1
                     axes[y][x] = df.sort_values(by='epochs').plot(x='epochs', y=['{}val_loss'.format(pref), '{}train_loss'.format(pref)], ax=axes[y][x], legend=legend)
                     if x == 0:
                         axes[y][x].set_ylabel('RMSE')
@@ -123,10 +123,10 @@ for cv in ['_RCV', '_SCV']:
     y += 1
 # fig.tight_layout()
 plt.show()
-# fig.savefig(os.path.join(output_dir, 'training_statistics_maize_resnet18.png'))
+fig.savefig(os.path.join(output_dir, 'training_statistics_maize_resnet18.png'))
 # fig.savefig(os.path.join(output_dir, 'training_statistics_soy_resnet18.png'))
 # fig.savefig(os.path.join(output_dir, 'training_statistics_sunflowers_resnet18.png'))
 
 # fig.savefig(os.path.join(output_dir, 'training_statistics_maize_baselinemodel.png'))
 # fig.savefig(os.path.join(output_dir, 'training_statistics_soy_baselinemodel.png'))
-fig.savefig(os.path.join(output_dir, 'training_statistics_sunflowers_baselinemodel.png'))
+# fig.savefig(os.path.join(output_dir, 'training_statistics_sunflowers_baselinemodel.png'))

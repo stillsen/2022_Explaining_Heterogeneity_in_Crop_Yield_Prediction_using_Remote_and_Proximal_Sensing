@@ -12,7 +12,8 @@ from matplotlib import pyplot as plt
 import torch
 import sklearn.metrics
 import pandas as pd
-
+from matplotlib.ticker import LinearLocator
+from matplotlib.ticker import FormatStrFormatter
 # Own modules
 
 
@@ -40,27 +41,34 @@ output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogen
 # output_root = '/media/stiller/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
 
 output_dirs = [
-    'P_68_resnet18_SCV_RCV',
-    'P_65_resnet18_SCV_RCV',
-    'P_76_resnet18_SCV_RCV',
-    # 'P_68_baselinemodel_SCV_RCV',
-    # 'P_65_baselinemodel_SCV_RCV',
-    # 'P_76_baselinemodel_SCV_RCV',
+    # 'P_65_resnet18_SCV_RCV',
+    # 'P_68_resnet18_SCV_RCV',
+    # 'P_76_resnet18_SCV_RCV',
+    'P_68_baselinemodel_SCV_RCV',
+    'P_65_baselinemodel_SCV_RCV',
+    'P_76_baselinemodel_SCV_RCV',
               ]
 output_dirs = [os.path.join(output_root, f) for f in output_dirs]
 # figure_path='/home/stillsen/Documents/GeoData/PatchCROP/AIA/Figures'
 
-ctype= ['0','1','2','3','4','5','6','7','8']
-taxonomic_groups_to_color = {'0': 1/10, '1': 2/10, '2': 3/10,
-                             '3': 4/10,
-                             '4': 5/10, '5': 6/10, '6':7/10, '7':8/10, '8':9/10}
+# ctype= ['0','1','2','3','4','5','6','7','8']
+# taxonomic_groups_to_color = {'0': 1/10, '1': 2/10, '2': 3/10,
+#                              '3': 4/10,
+#                              '4': 5/10, '5': 6/10, '6':7/10, '7':8/10, '8':9/10}
+ctype= ['0','1','2','3']
+taxonomic_groups_to_color = {'0': 1/5,
+                             '1': 2/5,
+                             '2': 3/5,
+                             '3': 4/5,
+                             }
 cc = [taxonomic_groups_to_color[x] for x in ctype]
 # color map
-cmap = plt.cm.get_cmap('tab10', 9)
+# cmap = plt.cm.get_cmap('tab10', 9)
+cmap = plt.cm.get_cmap('viridis', 9)
 # #encode cc in cmap
 colors = cmap(cc)
 
-
+scale = 0.1
 
 # patch_no = 73
 patch_no = 76
@@ -83,11 +91,11 @@ i = 0
 legend = True
 
 font_size = 15
-medium_font_font_size = 13
-small_font_font_size = 10
+medium_font_font_size = 12
+small_font_font_size = 9
 plt.rc('font', size=medium_font_font_size)          # controls default text sizes
 plt.rc('axes', titlesize=medium_font_font_size)     # fontsize of the axes title
-plt.rc('axes', labelsize=small_font_font_size)    # fontsize of the x and y labels
+plt.rc('axes', labelsize=medium_font_font_size)    # fontsize of the x and y labels
 plt.rc('xtick', labelsize=small_font_font_size)    # fontsize of the tick labels
 plt.rc('ytick', labelsize=small_font_font_size)    # fontsize of the tick labels
 plt.rc('legend', fontsize=medium_font_font_size)    # legend fontsize
@@ -103,7 +111,7 @@ fig, axes = plt.subplots(6,3, figsize=(9, 15))
 # top = 0.9      # the top of the subplots of the figure
 # wspace = 0.2   # the amount of width reserved for blank space between subplots
 # hspace = 0.2   # the amount of height reserved for white space between subplots
-left  = 0.1  # the left side of the subplots of the figure
+left  = 0.15  # the left side of the subplots of the figure
 right = 0.95    # the right side of the subplots of the figure
 bottom = 0.05  # the bottom of the subplots of the figure
 top = 0.95      # the top of the subplots of the figure
@@ -114,9 +122,10 @@ plt.subplots_adjust(left=left, bottom=bottom, right=right, top=top, wspace=wspac
 # fig.set_size_inches(11, 16, forward=True)
 
 
-crop_type = [r'$\bf{Maize}$',
+crop_type = [
              r'$\bf{Soy}$',
-             r'$\bf{Sunflowers}$']
+             r'$\bf{Maize}$',
+             r'$\bf{Sunflower}$']
 for this_output_dir in output_dirs:
     for cv in ['RCV_', 'SCV_']:
         j = 0
@@ -149,8 +158,13 @@ for this_output_dir in output_dirs:
                         y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + cv + str(k) + '.pt')))]
 
                 y_hat = [prediction/4 for prediction in y_hat]
+
+                # scale to tonnes
+                y_hat = [elem*scale for elem in y_hat]
+                y = [elem*scale for elem in y]
                 # plot in combined figure
-                axes[i][j].scatter(x=y_hat, y=y, marker='.', c=colors[5], alpha=0.8)
+                # axes[i][j].scatter(x=y_hat, y=y, marker='.', c=colors[5], alpha=0.8)
+                axes[i][j].scatter(x=y_hat, y=y, marker='.', c='grey', alpha=0.6)
 
                 test_r2 = np.mean(sklearn.metrics.r2_score(y, y_hat))
                 test_r = np.corrcoef(y, y_hat)[0,1]
@@ -183,8 +197,12 @@ for this_output_dir in output_dirs:
                     local_r2.append(r2)
                     local_r.append(r)
 
+                    # scale to tonnes
+                    y_hat = [elem * scale for elem in y_hat]
+                    y = [elem * scale for elem in y]
+
                     # plot in combined figure
-                    axes[i][j].scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
+                    axes[i][j].scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.6)
 
                 avg_local_r2 = np.mean(local_r2)
                 glogal_r2 = sklearn.metrics.r2_score(y_true=global_y, y_pred=global_y_hat)
@@ -208,17 +226,28 @@ for this_output_dir in output_dirs:
                 if j == 2:
                     axes[i][j].set_title(r'$\bf{Test}$')
             if i==5:
-                axes[i][j].set_xlabel('predicted yield [dt/ha]')
-            if j == 0:
+                # axes[i][j].set_xlabel('predicted yield [dt/ha]')
+                axes[i][j].set_xlabel('predicted yield [t/ha]')
+            if j == 0: # for one row
                 # axes[i][j].set_ylabel('yield [dt/ha]')
                 axes[i][j].set_ylabel('')
-                axes[i][j].text(-0.18, 0.5, 'yield [dt/ha]', rotation=90, va='center', transform=axes[i][j].transAxes, fontsize=small_font_font_size)
+                # axes[i][j].text(-0.18, 0.5, 'yield [dt/ha]', rotation=90, va='center', transform=axes[i][j].transAxes, fontsize=small_font_font_size)
+                # axes[i][j].text(-0.18, 0.5, 'yield [t/ha]', rotation=90, va='center', transform=axes[i][j].transAxes, fontsize=small_font_font_size)
+                axes[i][j].text(-0.28, 0.5, 'yield [t/ha]', rotation=90, va='center', transform=axes[i][j].transAxes, fontsize=medium_font_font_size)
                 if i%2 == 0:
                     # axes[i][j].text(-0.13, 0.95, r'$\bf{RCV}$', fontsize=font_size, transform=axes[i][j].transAxes)
-                    axes[i][j].text(-0.3, 0.45, r'$\it{RCV}$', rotation=90, va='center',  transform=axes[i][j].transAxes)
+                    # axes[i][j].text(-0.3, 0.45, r'$\it{RCV}$', rotation=90, va='center',  transform=axes[i][j].transAxes)
+                    axes[i][j].text(-0.43, 0.45, r'$\it{RCV}$', rotation=90, va='center',  transform=axes[i][j].transAxes)
                 else:
                     # axes[i][j].text(-0.13, 0.95, r'$\bf{SCV}$', fontsize=font_size, transform=axes[i][j].transAxes)
-                    axes[i][j].text(-0.3, 0.45, r'$\it{SCV}$', rotation=90, va='center', transform=axes[i][j].transAxes)
+                    # axes[i][j].text(-0.3, 0.45, r'$\it{SCV}$', rotation=90, va='center', transform=axes[i][j].transAxes)
+                    axes[i][j].text(-0.43, 0.45, r'$\it{SCV}$', rotation=90, va='center', transform=axes[i][j].transAxes)
+
+            if j == 0 or j==2: # set axis limits for one row, depending on y ranges
+                lim = [min(axes[i][j].get_ylim()[0], axes[i][j].get_xlim()[0]),
+                       max(axes[i][j].get_ylim()[1], axes[i][j].get_xlim()[1])]
+                hops = (lim[1] - lim[0])/3
+                # ticks = [lim[0], lim[0]+hops, lim[0]+2*hops, lim[1]]
             if j < 2 : # plot train and validation pearson's r
                 axes[i][j].text(0.025, 0.65 ,'\nglobal r = ' + str(global_r)[:4] + '\nlocal median r = ' + str(np.median(local_r))[:4], transform=axes[i][j].transAxes)
             else: # test mean r
@@ -227,22 +256,32 @@ for this_output_dir in output_dirs:
 
             # group line and crop name
             if i % 2 == 0 and j==0:
-                axes[i][j].text(-0.4, 0, crop_type[int(i/2)], rotation=90, va='center', transform=axes[i][j].transAxes)
+                axes[i][j].text(-0.53, 0, crop_type[int(i/2)], rotation=90, va='center', transform=axes[i][j].transAxes)
+                # axes[i][j].text(-0.65, -0.25, crop_type[int(i/2)], rotation=90, va='center', transform=axes[i][j].transAxes)
                 # axes[i][j].plot([-0.2, -0.2], [-1, 1], color='black', transform=axes[i][j].transAxes)
-                axes[i][j].plot([-0.22, -0.22], [-1.28, 1], color='black', clip_on=False, transform=axes[i][j].transAxes)
+                # axes[i][j].plot([-0.22, -0.22], [-1.28, 1], color='black', clip_on=False, transform=axes[i][j].transAxes)
+                # axes[i][j].plot([-0.37, -0.37], [-1.28, 1], color='black', clip_on=False, transform=axes[i][j].transAxes)
+                axes[i][j].plot([-0.33, -0.33], [-1.28, 1], color='black', clip_on=False, transform=axes[i][j].transAxes)
 
+            axes[i][j].set_ylim(lim)
+            axes[i][j].set_xlim(lim)
+            # axes[i][j].set_xticks(ticks)
 
-            lim = [min(axes[i][j].get_ylim()[0], axes[i][j].get_xlim()[0]),
-                   max(axes[i][j].get_ylim()[1], axes[i][j].get_xlim()[1])]
-            # axes[i][j].set_ylim(lim)
+            axes[i][j].get_yaxis().set_major_locator(LinearLocator(numticks=3))
+            axes[i][j].get_xaxis().set_major_locator(LinearLocator(numticks=3))
+            # axes[i][j].set_ymargin(hops/2)
+            # axes[i][j].set_xmargin(hops/2)
+
+            axes[i][j].yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+            axes[i][j].xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
 
             j += 1
         i += 1
 # fig.tight_layout()
 plt.show()
 #
-fig.savefig(os.path.join(output_root, 'y_yhat_resnet_all.svg'), papertype='a4')
-fig.savefig(os.path.join(output_root, 'y_yhat_resnet_all.png'), papertype='a4')
+# fig.savefig(os.path.join(output_root, 'y_yhat_resnet_all_pub.svg'), papertype='a4')
+# fig.savefig(os.path.join(output_root, 'y_yhat_resnet_all_pub.png'), papertype='a4')
 
 # fig.savefig(os.path.join(output_root, 'y_yhat_baseline_all.svg'), papertype='a4')
-# fig.savefig(os.path.join(output_root, 'y_yhat_baseline_all.png'), papertype='a4')
+fig.savefig(os.path.join(output_root, 'y_yhat_baseline_all_pub_lims.png'), papertype='a4')

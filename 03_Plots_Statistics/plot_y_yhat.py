@@ -36,14 +36,23 @@ input_files_rgb = dict()
 data_root = '../../2_Data_preprocessed/2977x_Raster_Rescaled_Labels_and_Features__Analyses_Packages_for_HPC/'
 # output_root = '/beegfs/stiller/PatchCROP_all/Output/'
 # output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
-output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/shuffle/L2/'
+# output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/shuffle/L2/'
+output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/SSL/Tests/'
+# output_root = '/media/stillsen/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/ks/'
 # output_root = '/media/stiller/Hinkebein/PatchCROP/AIA/2022_Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing/Output/'
 
-output_dirs[65] = os.path.join(output_root, 'P_65_resnet18_SCV_no_test_L2_cycle_E1000')
-output_dirs[68] = os.path.join(output_root, 'P_68_resnet18_SCV_no_test_L2_cycle_E1000')
-# output_dirs[68] = os.path.join(output_root, 'P_68_resnet18_SCV_no_test_SSL_ALB_E2000')
-output_dirs[73] = os.path.join(output_root, 'P_73_ssl')
-output_dirs[76] = os.path.join(output_root, 'P_76_baselinemodel_RCV_L2_cycle_E1000')
+# output_dirs[65] = os.path.join(output_root, 'P_65_resnet18_SCV_no_test_L2_cycle_E1000')
+# output_dirs[68] = os.path.join(output_root, 'P_68_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224')
+# output_dirs[68] = os.path.join(output_root, 'P_68_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_56')
+# output_dirs['combined_train'] = os.path.join(output_root, 'Combined_crops_train_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224')
+# output_dirs['combined_test'] = os.path.join(output_root, 'Combined_crops_train_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224')
+# output_dirs[68] = os.path.join(output_root, 'P_68_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224-black-added-to-train-and-val')
+# output_dirs[68] = os.path.join(output_root, 'P_68_VICRegLConvNext_SCV_no_test_E100lightly-VICRegLConvNext_kernel_size_224_recompute')
+output_dirs[68] = os.path.join(output_root, 'P_68_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224_recompute')
+# output_dirs[68] = os.path.join(output_root, 'P_68_VICReg_SCV_no_test_E100lightly-VICReg_kernel_size_224-black-added-to-train')
+# output_dirs[68] = os.path.join(output_root, 'P_68_SimSiam_SCV_no_test_E1000lightly-SimSiam_s112')
+# output_dirs[73] = os.path.join(output_root, 'P_73_ssl')
+# output_dirs[76] = os.path.join(output_root, 'P_76_baselinemodel_RCV_L2_cycle_E1000')
 
 # figure_path='/home/stillsen/Documents/GeoData/PatchCROP/AIA/Figures'
 
@@ -69,9 +78,12 @@ colors = cmap(cc)
 
 # patch_no = 73
 # patch_no = 76
+# patch_no = 'combined_train'
+# patch_no = 'combined_test'
 patch_no = 68
-# patch_no = 68
-# test_patch_no = 90
+test_patch_no = 90
+# test_patch_no = 19
+# test_patch_no = 95
 
 num_folds = 4
 
@@ -81,11 +93,13 @@ this_output_dir = output_dirs[patch_no]
 # test_patch_name = 'Patch_ID_'+str(patch_no)
 test_patch_name = ''
 
-sets = ['_train_',
+sets = [
+        '_train_',
         '_val_',
         '_test_',
         ]
 
+# file_suffix = '_'+str(patch_no)
 for s in sets:
 ### Combined Plots - all folds in one figure
     # pool all y over all folds
@@ -108,14 +122,18 @@ for s in sets:
         y_hat = None
 
         for k in range(num_folds):
+            # if k == 1: continue
             print('combined plots: {}th-fold'.format(k))
             # load y
             y = torch.load( os.path.join(this_output_dir, test_patch_name + 'y' + s + str(k) + '.pt'))
+            # y = torch.load( os.path.join(this_output_dir, test_patch_name + 'y' + file_suffix + s + str(k) + '.pt'))
             # load y_hat and add y_hat of successive folds (later divide by num_folds for average prediction score)
             if k == 0:
                 y_hat = torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + str(k) + '.pt'))
+                # y_hat = torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat'+ file_suffix + s + str(k) + '.pt'))
             else:
                 y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + str(k) + '.pt')))]
+                # y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + file_suffix + s + str(k) + '.pt')))]
 
         y_hat = [prediction/4 for prediction in y_hat]
         # plot in combined figure
@@ -125,7 +143,7 @@ for s in sets:
         test_r2 = np.mean(sklearn.metrics.r2_score(y, y_hat))
         test_r = np.corrcoef(y, y_hat)[0,1]
 
-        ax.set_title('average ' + r'$R^{2} = $' + str(test_r2)[:4] + ', average r = ' + str(test_r)[:4], fontsize=16)
+        ax.set_title(' average r = ' + str(test_r)[:4], fontsize=16)
 
         ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
         ax.set_ylabel('Y [dt/ha]', fontsize=16)
@@ -136,7 +154,8 @@ for s in sets:
         # ax.set_xlim([-100,100])
         # ax.set_ylim(lim)
 
-        fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_average' + s[:-1] + '.png'))
+        fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_average' + s[:-1] + '.png'), dpi=400)
+        # fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_average' + file_suffix + s[:-1] + '.png'))
 
         ### save performance metrics
         df = pd.DataFrame({
@@ -144,6 +163,7 @@ for s in sets:
                            'average_r': [str(test_r)[:4]],
                            })
         df.to_csv(os.path.join(this_output_dir, 'performance_metrics_f' + str(k) + '_' + s + '.csv'), encoding='utf-8')
+        # df.to_csv(os.path.join(this_output_dir, 'performance_metrics_f' + file_suffix + str(k) + '_' + s + '.csv'), encoding='utf-8')
         ###
 
     else: # val and train
@@ -154,10 +174,13 @@ for s in sets:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         for k in range(num_folds):
+            # if k == 1: continue
             print('combined plots: {}th-fold'.format(k))
             # load y and y_hat
             y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + str(k) + '.pt'))
+            # y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + file_suffix + s + str(k) + '.pt'))
             y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s + str(k) + '.pt'))
+            # y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + file_suffix + s + str(k) + '.pt'))
             # pool y and y_hat globally
             global_y.extend(y)
             global_y_hat.extend(y_hat)
@@ -174,7 +197,8 @@ for s in sets:
         glogal_r2 = sklearn.metrics.r2_score(y_true=global_y, y_pred=global_y_hat)
         global_r = np.corrcoef(global_y, global_y_hat)[0,1]
 
-        ax.set_title('global ' + r'$R^{2} = $' + str(glogal_r2)[:4] + ', global r = ' + str(global_r)[:4]+ '\n local ' + r'$R^{2} = $' + str(avg_local_r2)[:4]  + ', local r = ' + str(np.mean(local_r))[:4], fontsize=16)
+        # ax.set_title('global ' + r'$R^{2} = $' + str(glogal_r2)[:4] + ', global r = ' + str(global_r)[:4]+ '\n local ' + r'$R^{2} = $' + str(avg_local_r2)[:4]  + ', local r = ' + str(np.mean(local_r))[:4], fontsize=16)
+        ax.set_title('global r = ' + str(global_r)[:4]+ '\n local r = ' + str(np.mean(local_r))[:4], fontsize=16)
         ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
         ax.set_ylabel('Y [dt/ha]', fontsize=16)
 
@@ -184,7 +208,8 @@ for s in sets:
         # ax.set_xlim([-100,100])
         ax.set_ylim(lim)
 
-        fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_global' + s[:-1] + '.png'))
+        fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_global' + s[:-1] + '.png'), dpi=400)
+        # fig.savefig(os.path.join(this_output_dir, test_patch_name + 'y_yhat_global' + file_suffix + s[:-1] + '.png'))
 
     ### save performance metrics
         df = pd.DataFrame({'global_r2': [str(glogal_r2)[:4]],
@@ -195,34 +220,35 @@ for s in sets:
                            'local_r_mean':[str(np.mean(local_r))[:4]],
                            })
         df.to_csv(os.path.join(this_output_dir, 'performance_metrics_f' + str(k) + '_' + s + '.csv'), encoding='utf-8')
+        # df.to_csv(os.path.join(this_output_dir, 'performance_metrics_f' + file_suffix + str(k) + '_' + s + '.csv'), encoding='utf-8')
         ###
 
-### Single Plots
-    for k in range(num_folds):
-        print('single plots: {}th-fold'.format(k))
-        y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + str(k) + '.pt'))
-
-        y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s + str(k) + '.pt'))
-
-        local_r2 = sklearn.metrics.r2_score(y, y_hat)
-        local_r = np.corrcoef(y, y_hat)[0,1]
-
-        # plot in separate figure
-        fig = plt.figure(k)
-        fig.clf()
-        fig.tight_layout()
-        ax = fig.add_subplot(111)
-
-        ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
-
-        ax.set_title('local ' + r'$R^{2} = $' + str(local_r2)[:4] + ', local r = ' + str(local_r)[:4], fontsize=16)
-        ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
-        ax.set_ylabel('Y [dt/ha]', fontsize=16)
-
-
-        lim = [min(ax.get_ylim()[0], ax.get_xlim()[0]),
-               max(ax.get_ylim()[1], ax.get_xlim()[1])]
-        # ax.set_xlim([-100,100])
-        ax.set_ylim(lim)
-
-        fig.savefig(os.path.join(this_output_dir, test_patch_name+'y_yhat_' + str(k) + '_' + s[:-1] + '.png'))
+# ### Single Plots
+#     for k in range(num_folds):
+#         print('single plots: {}th-fold'.format(k))
+#         y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + str(k) + '.pt'))
+#
+#         y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s + str(k) + '.pt'))
+#
+#         local_r2 = sklearn.metrics.r2_score(y, y_hat)
+#         local_r = np.corrcoef(y, y_hat)[0,1]
+#
+#         # plot in separate figure
+#         fig = plt.figure(k)
+#         fig.clf()
+#         fig.tight_layout()
+#         ax = fig.add_subplot(111)
+#
+#         ax.scatter(x=y_hat, y=y, marker='.', c=colors[k], alpha=0.8)
+#
+#         ax.set_title('local ' + r'$R^{2} = $' + str(local_r2)[:4] + ', local r = ' + str(local_r)[:4], fontsize=16)
+#         ax.set_xlabel(r'$\hat{Y}$ [dt/ha]', fontsize=16)
+#         ax.set_ylabel('Y [dt/ha]', fontsize=16)
+#
+#
+#         lim = [min(ax.get_ylim()[0], ax.get_xlim()[0]),
+#                max(ax.get_ylim()[1], ax.get_xlim()[1])]
+#         # ax.set_xlim([-100,100])
+#         ax.set_ylim(lim)
+#
+#         fig.savefig(os.path.join(this_output_dir, test_patch_name+'y_yhat_' + str(k) + '_' + s[:-1] + '.png'))

@@ -33,7 +33,7 @@ import math
 
 # Libs
 import pandas as pd
-from osgeo import gdal
+# from osgeo import gdal
 import numpy as np
 from typing import Optional
 
@@ -45,14 +45,20 @@ import torch
 import torchvision.transforms as transforms
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset, ConcatDataset, TensorDataset
+from torchvision.datasets import VisionDataset
 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+from lightly.data import LightlyDataset
+from lightly.transforms import SimCLRTransform
+
 from matplotlib import pyplot as plt
 
+from PIL import Image
+
 # Own modules
-from TransformTensorDataset import TransformTensorDataset
+from TransformTensorDataset import TransformTensorDataset, CustomVisionDataset
 
 __author__ = 'Stefan Stiller'
 __copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
@@ -78,7 +84,8 @@ class PatchCROPDataModule:
                  seed,
                  data_dir: str = './',
                  batch_size: int = 20,
-                 stride: int = 10,
+                 stride: int = 30,
+                 kernel_size:int = 224,
                  workers: int = 0,
                  input_features: str = 'RGB',
                  augmented: bool = False,
@@ -95,6 +102,7 @@ class PatchCROPDataModule:
         self.input_files = input_files
         self.batch_size = batch_size
         self.stride = stride
+        self.kernel_size = kernel_size
         self.workers = workers
         self.augmented = augmented
         self.patch_id = patch_id
@@ -112,7 +120,7 @@ class PatchCROPDataModule:
         self.data_set = None
         self.setup_done = False
 
-        if self.input_features == 'RGB':
+        if self.input_features == 'RGB' or self.input_features == 'black':
             self.normalize = A.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         elif self.input_features == 'GRN':
@@ -132,22 +140,26 @@ class PatchCROPDataModule:
         # load feature label combinations
 
         if self.fake_labels:
-            kfold_dir = os.path.join(self.data_dir, 'kfold_set_fakelabels_s{}'.format(self.stride))
+            kfold_dir = os.path.join(self.data_dir, 'kfold_set_fakelabels_s{}_ks{}'.format(self.stride, self.kernel_size))
         else:
-            kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels_s{}'.format(self.stride))
-
+            if self.input_features == "black":
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels_s{}_ks{}_black'.format(self.stride, self.kernel_size))
+            else:
+                kfold_dir = os.path.join(self.data_dir, 'kfold_set_origlabels_s{}_ks{}'.format(self.stride, self.kernel_size))
+        print(kfold_dir)
         if not self.setup_done:
             # check if already build and load
             if os.path.isdir(kfold_dir):
                 # load raw remote sensing images
                 print('loading data')
-                if self.input_features == "RGB":
+                if self.input_features == "RGB" or self.input_features == "black":
                     file_name = 'Patch_ID_' + str(self.patch_id) + '.pt'
                 elif self.input_features == "GRN":
                     file_name = 'Patch_ID_' + str(self.patch_id) + '_grn.pt'
                 elif self.input_features == "RGBRN":
                     file_name = 'Patch_ID_' + str(self.patch_id) + '_RGBRN.pt'
 
+                print('loading {} in {}'.format(kfold_dir,file_name))
                 # f = torch.load(os.path.join(kfold_dir,file), map_location=torch.device('cuda'))
                 f = torch.load(os.path.join(kfold_dir, file_name))
                 self.data_set = f
@@ -158,11 +170,13 @@ class PatchCROPDataModule:
                     label_matrix = torch.tensor([])
                     feature_matrix = torch.tensor([])
                     # load label
+                    print('reading labels {}'.format(os.path.join(self.data_dir, label)))
                     label_matrix = torch.tensor(gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray(), dtype=torch.float)
                     # label_matrix = gdal.Open(os.path.join(self.data_dir, label), gdal.GA_ReadOnly).ReadAsArray()
                     # load and concat features
                     for idx, feature in enumerate(features):
                         # if RGB drop alpha channel, else all
+                        print('reading features {}'.format(os.path.join(self.data_dir, feature)))
                         if 'soda' in feature or 'Soda' in feature:  # RGB
                             print(feature)
                             f = torch.tensor(gdal.Open(os.path.join(self.data_dir, feature), gdal.GA_ReadOnly).ReadAsArray()[:3, :, :], dtype=torch.float)  # only first 3 channels -> not alpha channel
@@ -185,7 +199,7 @@ class PatchCROPDataModule:
                 torch.save(self.data_set, file_name)
             self.setup_done = True
 
-    def generate_sliding_window_augmented_ds(self, label_matrix, feature_matrix, lower_bound: int = 327, kernel_size: int = 224) -> None:
+    def generate_sliding_window_augmented_ds(self, label_matrix, feature_matrix, lower_bound: int = 327) -> None:
         '''
         :param label_matrix: kriging interpolated yield maps
         :param feature_matrix: stack of feature maps, such as rgb remote sensing, multi-channel remote sensing or dsm or ndvi
@@ -206,6 +220,20 @@ class PatchCROPDataModule:
         if self.input_features == 'RGB':
             # feature_arr = feature_arr / 255 # --> deprecated, normalization is now done in setup_fold()->transformer
             pass
+        elif self.input_features == 'black':
+            # blacken one quarter of the image
+            mask = torch.zeros(3, 2323, 2323)
+            quarter_size = 2323 // 2  # Assuming you want to blacken the top-left quarter
+            mask[:, :quarter_size, :quarter_size] = 1
+            # Generate random values close to zero to multiply with the original tensor
+            random_values = torch.rand(3, 2323, 2323) * 0.1
+
+            # Apply the mask to the original tensor
+            feature_arr = feature_arr * (1 - mask) + (feature_arr * mask * random_values).round()
+
+            # LABEL MISSING!!!!!
+            warnings.warn("Labels not zeroed! -> only use for SSL training!")
+
         elif self.input_features == 'GRN':
             c1_min = feature_arr[0, :, :].min()
             c2_min = feature_arr[1, :, :].min()
@@ -235,6 +263,17 @@ class PatchCROPDataModule:
             label_arr = label_arr / 255
         else:
             label_arr = label_matrix[lower_bound:upper_bound_y, lower_bound:upper_bound_x]  # label matrix un-normalized
+            if self.input_features == 'black':
+                # blacken one quarter of the image
+                mask = torch.zeros(2323, 2323)
+                quarter_size = 2323 // 2  # Assuming you want to blacken the top-left quarter
+                mask[:quarter_size, :quarter_size] = 1
+                # Generate random values close to zero to multiply with the original tensor
+                random_values = torch.rand(2323, 2323) * 0.1
+
+                # Apply the mask to the original tensor
+                label_arr = label_arr * (1 - mask)+ label_arr * mask * random_values
+
         # set sizes
         self.data_set_row_extend = feature_arr.shape[2]
         self.data_set_column_extend = feature_arr.shape[1]
@@ -243,9 +282,9 @@ class PatchCROPDataModule:
         # x and y are need to able to take different values, as patches with flowerstrips are smaller
         x_size = feature_arr.shape[2]
         y_size = feature_arr.shape[1]
-        possible_shifts_x = int((x_size - kernel_size) / self.stride)
+        possible_shifts_x = int((x_size - self.kernel_size) / self.stride)
         x_starts = np.array(list(range(possible_shifts_x))) * self.stride
-        possible_shifts_y = int((y_size - kernel_size) / self.stride)
+        possible_shifts_y = int((y_size - self.kernel_size) / self.stride)
         y_starts = np.array(list(range(possible_shifts_y))) * self.stride
 
         # loop over start postitions and save kernel as separate image
@@ -262,8 +301,8 @@ class PatchCROPDataModule:
             for x in x_starts:
                 # shift kernel over image and extract kernel part
                 # only take RGB value
-                feature_kernel_img = feature_arr[:, y:y + kernel_size, x:x + kernel_size]
-                label_kernel_img = label_arr[y:y + kernel_size, x:x + kernel_size]
+                feature_kernel_img = feature_arr[:, y:y + self.kernel_size, x:x + self.kernel_size]
+                label_kernel_img = label_arr[y:y + self.kernel_size, x:x + self.kernel_size]
                 if x == 0 and y == 0:
                     feature_kernel_tensor = feature_kernel_img.unsqueeze(0)
                     label_kernel_tensor = label_kernel_img.mean().unsqueeze(0)
@@ -272,7 +311,7 @@ class PatchCROPDataModule:
                     label_kernel_tensor = torch.cat((label_kernel_tensor, label_kernel_img.mean().unsqueeze(0)), 0)
         self.data_set = (feature_kernel_tensor, label_kernel_tensor)
 
-    def setup_fold(self, fold: int = 0, training_response_standardization: bool = True, test_transforms=None) -> None:
+    def setup_fold(self, fold: int = 0, training_response_standardization: bool = True, testset_transforms=None, trainset_transforms=None, add_n_black_noise_img_to_train=0, add_n_black_noise_img_to_val=0, ) -> None:
         '''
         Set up validation and train data set using self.data_set and apply normalization for both and augmentations for the train set if
         self.augmented. Overlap samples between train and test set are discarded.
@@ -306,7 +345,7 @@ class PatchCROPDataModule:
                 #  2    0   {1,3}  |  3
 
                 # sliding window size
-                window_size = 224
+                window_size = self.kernel_size
                 stride = self.stride
                 x_size = y_size = 2322
 
@@ -509,45 +548,74 @@ class PatchCROPDataModule:
             if self.validation_strategy == 'SCV':
                 test_set = (self.data_set[0][test_idxs, :, :, :], self.data_set[1][test_idxs])
 
-        if test_transforms is None:
-            testset_transformer = A.Compose([  # assumption by albumentations: image is in HWC
+        if testset_transforms is None:
+            testset_transforms = A.Compose([  # assumption by albumentations: image is in HWC
                 self.normalize,
                 ToTensorV2(),  # convert to CHW
             ])
-        else:
-            testset_transformer = test_transforms
 
         # type cast to numpy again for compatibility with albumentations\
         # val_set = (val_set[0].moveaxis(1,3).numpy(), val_set[1].numpy())
         # test_set = (test_set[0].moveaxis(1,3).numpy(), test_set[1].numpy())
         val_set = (val_set[0].movedim(1, 3).numpy(), val_set[1].numpy())
-
-        self.val_fold = TransformTensorDataset(val_set, transform=testset_transformer)
-        if self.validation_strategy == 'SCV':
-            test_set = (test_set[0].movedim(1, 3).numpy(), test_set[1].numpy())
-            self.test_fold = TransformTensorDataset(test_set, transform=testset_transformer)
-
-        # only train set is augmented if enabled
-        if self.augmented:
-            trainset_transformer = A.Compose([  # transforms.ToPILImage(),
-                self.normalize,
-                # A.Blur(),
-                # A.CLAHE(),
-                A.RandomBrightnessContrast(),
-                A.RandomRotate90(),
-                A.VerticalFlip(),
-                A.HorizontalFlip(),
-                A.Transpose(),
-                ToTensorV2(),
-            ])
-        else:
-            trainset_transformer = A.Compose([  # transforms.ToPILImage(),
-                self.normalize,
-                ToTensorV2(),
-            ])
         # type cast to numpy again for compatibility with albumentations\
         train_set = (train_set[0].movedim(1, 3).numpy(), train_set[1].numpy())
-        self.train_fold = TransformTensorDataset(train_set, transform=trainset_transformer)
+
+        # add black noise images if not 0
+        if add_n_black_noise_img_to_train > 0:
+            if train_set[0].shape[3] != 3: raise NotImplementedError("black noise images only implemented for 3-channel RGB")
+            # n_train_additives = round(len(train_set[1]) * 0.25)
+            # train_additives = (torch.round(torch.rand(n_train_additives, self.kernel_size, self.kernel_size, 3)*10).int(), torch.zeros(n_train_additives))
+            train_additives = (torch.round(torch.rand(add_n_black_noise_img_to_train, self.kernel_size, self.kernel_size, 3)*10).int(), torch.zeros(add_n_black_noise_img_to_train))
+            train_set = (np.concatenate((train_set[0], train_additives[0]), axis=0), np.concatenate((train_set[1], train_additives[1]), axis=0))
+        if add_n_black_noise_img_to_val > 0:
+            if val_set[0].shape[3] != 3: raise NotImplementedError("black noise images only implemented for 3-channel RGB")
+            # n_val_additives = round(len(val_set[1]) * 0.25)
+            val_additives = (torch.round(torch.rand(add_n_black_noise_img_to_val, self.kernel_size, self.kernel_size, 3) * 10).int(), torch.zeros(add_n_black_noise_img_to_val))
+            val_set = (np.concatenate((val_set[0], val_additives[0]), axis=0), np.concatenate((val_set[1], val_additives[1]), axis=0))
+
+        if self.validation_strategy == 'SCV':
+            test_set = (test_set[0].movedim(1, 3).numpy(), test_set[1].numpy())
+            self.test_fold = TransformTensorDataset(test_set, transform=testset_transforms)
+
+        # if no trainset_transforms provided (, i.e. transforms for lightly SSL like SimCLR transforms) -> transformTensorDataset and albumentations
+        if trainset_transforms == None:
+            # only train set is augmented if enabled
+            if self.augmented:
+                trainset_transforms = A.Compose([  # transforms.ToPILImage(),
+                    self.normalize,
+                    # A.Blur(),
+                    # A.CLAHE(),
+                    A.RandomBrightnessContrast(),
+                    A.RandomRotate90(),
+                    A.VerticalFlip(),
+                    A.HorizontalFlip(),
+                    A.Transpose(),
+                    ToTensorV2(),
+                ])
+            else:
+                trainset_transforms = A.Compose([  # transforms.ToPILImage(),
+                    self.normalize,
+                    ToTensorV2(),
+                ])
+
+            self.val_fold = TransformTensorDataset(val_set, transform=testset_transforms)
+            self.train_fold = TransformTensorDataset(train_set, transform=trainset_transforms)
+        else:
+            # self.val_fold = LightlyDataset.from_torch_dataset(CustomTensorDataset(val_set), transform=testset_transforms)
+            # self.train_fold= LightlyDataset.from_torch_dataset(CustomTensorDataset(train_set), transform=trainset_transforms)
+            # self.val_fold = LightlyDataset.from_torch_dataset( [Image.fromarray(np.uint8(image)) for image in val_set[0]], transform=testset_transforms)
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+            testset_transforms = transforms.Compose([  # assumption by albumentations: image is in HWC
+                transforms.ToTensor(),  # convert to CHW
+                normalize,
+            ])
+            # self.val_fold = LightlyDataset.from_torch_dataset(CustomVisionDataset(val_set), transform=testset_transforms)
+            self.val_fold = LightlyDataset.from_torch_dataset(CustomVisionDataset(val_set), transform=trainset_transforms)
+            self.train_fold= LightlyDataset.from_torch_dataset(CustomVisionDataset(train_set), transform=trainset_transforms)
+            # self.train_fold= LightlyDataset.from_torch_dataset( [Image.fromarray(np.uint8(image)) for image in train_set[0]], transform=trainset_transforms)
+
         print('\tSet up done...')
 
     def load_subset_indices(self, k):
@@ -568,19 +636,19 @@ class PatchCROPDataModule:
     def set_batch_size(self, batch_size: int):
         self.batch_size = batch_size
 
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self, shuffle:bool=True) -> DataLoader:
         print('loading training set with {} samples'.format(len(self.train_fold)))
-        return DataLoader(self.train_fold, shuffle=True, batch_size=self.batch_size, num_workers=self.workers)
+        return DataLoader(self.train_fold, shuffle=shuffle, batch_size=self.batch_size, num_workers=self.workers)
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self, shuffle:bool=True) -> DataLoader:
         print('loading validation set with {} samples'.format(len(self.val_fold)))
-        return DataLoader(self.val_fold, num_workers=self.workers, batch_size=self.batch_size)
+        return DataLoader(self.val_fold, shuffle=shuffle, num_workers=self.workers, batch_size=self.batch_size, drop_last=True)
 
-    def test_dataloader(self) -> DataLoader:
+    def test_dataloader(self, shuffle:bool=False) -> DataLoader:
         print('loading validation set with {} samples'.format(len(self.test_fold)))
-        return DataLoader(self.test_fold, num_workers=self.workers, batch_size=self.batch_size)
+        return DataLoader(self.test_fold, shuffle=shuffle, num_workers=self.workers, batch_size=self.batch_size)
 
-    def all_dataloader(self) -> DataLoader:
+    def all_dataloader(self, shuffle:bool=False) -> DataLoader:
         print('loading whole patch data set with {} samples'.format(len(self.data_set)))
         transformer = A.Compose([self.normalize,
                                  ToTensorV2(),
@@ -588,7 +656,7 @@ class PatchCROPDataModule:
         data_set = (self.data_set[0].movedim(1, 3).numpy(), self.data_set[1].numpy())
         whole_ds = TransformTensorDataset(data_set, transform=transformer)
 
-        return DataLoader(whole_ds, num_workers=self.workers, batch_size=self.batch_size)
+        return DataLoader(whole_ds, shuffle=shuffle, num_workers=self.workers, batch_size=self.batch_size)
 
     def create_debug_samples(self, n=20):
         '''

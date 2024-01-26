@@ -43,7 +43,8 @@ output_dirs = [
     # 'P_68_resnet18_SCV_RCV',
     # 'P_65_resnet18_SCV_RCV',
     # 'P_76_resnet18_SCV_RCV',
-    'P_68_baselinemodel_SCV_RCV',
+    # 'P_68_baselinemodel_SCV_RCV',
+    'P_68_SimCLR_SCV_no_test_E1000lightly-SimCLR',
     # 'P_65_baselinemodel_SCV_RCV',
     # 'P_76_baselinemodel_SCV_RCV',
               ]
@@ -63,9 +64,9 @@ colors = cmap(cc)
 
 
 # patch_no = 73
-patch_no = 76
+# patch_no = 76
 # patch_no = 65
-# patch_no = 68
+patch_no = 68
 # test_patch_no = 90
 
 num_folds = 4
@@ -97,7 +98,8 @@ fig, axes = plt.subplots(2,3)
 i = 0
 legend = True
 plt.rcParams["font.size"] = "10"
-for cv in ['RCV_', 'SCV_']:
+# for cv in ['RCV_', 'SCV_']:
+for cv in ['SCV_']:
     j = 0
     for s in sets:
     ### Combined Plots - all folds in one figure
@@ -123,12 +125,15 @@ for cv in ['RCV_', 'SCV_']:
             for k in range(num_folds):
                 print('combined plots: {}th-fold'.format(k))
                 # load y
-                y = torch.load( os.path.join(this_output_dir, test_patch_name + 'y' + s + cv + str(k) + '.pt'))
+                # y = torch.load( os.path.join(this_output_dir, test_patch_name + 'y' + s + cv + str(k) + '.pt'))
+                y = torch.load( os.path.join(this_output_dir, test_patch_name + 'y' + s  + str(k) + '.pt'))
                 # load y_hat and add y_hat of successive folds (later divide by num_folds for average prediction score)
                 if k == 0:
-                    y_hat = torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + cv + str(k) + '.pt'))
+                    # y_hat = torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + cv + str(k) + '.pt'))
+                    y_hat = torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + str(k) + '.pt'))
                 else:
-                    y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + cv + str(k) + '.pt')))]
+                    # y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + cv + str(k) + '.pt')))]
+                    y_hat = [y_hat[i]+prediction for i, prediction in enumerate(torch.load(os.path.join(this_output_dir, test_patch_name + 'y_hat' + s + str(k) + '.pt')))]
 
             y_hat = [prediction/4 for prediction in y_hat]
             # plot in combined figure
@@ -187,8 +192,10 @@ for cv in ['RCV_', 'SCV_']:
             for k in range(num_folds):
                 print('combined plots: {}th-fold'.format(k))
                 # load y and y_hat
-                y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + cv + str(k) + '.pt'))
-                y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s  + cv + str(k) + '.pt'))
+                y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + str(k) + '.pt'))
+                # y = torch.load(os.path.join(this_output_dir, test_patch_name+'y' + s + cv + str(k) + '.pt'))
+                y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s + str(k) + '.pt'))
+                # y_hat = torch.load(os.path.join(this_output_dir, test_patch_name+'y_hat' + s  + cv + str(k) + '.pt'))
                 # pool y and y_hat globally
                 global_y.extend(y)
                 global_y_hat.extend(y_hat)

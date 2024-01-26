@@ -28,7 +28,7 @@ from torch import nn
 import warnings
 # Own modules
 from PatchCROPDataModule import PatchCROPDataModule
-from RGBYieldRegressor import RGBYieldRegressor
+from RGBYieldRegressor_Trainer import RGBYieldRegressor_Trainer
 from TuneYieldRegressor import TuneYieldRegressor
 
 from directory_listing import output_dirs, data_dirs, input_files_rgb
@@ -265,12 +265,14 @@ if __name__ == "__main__":
 
             # if domain tuning, load and pass the state dict of the pretrained model for hyper param tuning
             state_dict=None
-            if os.path.exists(os.path.join(this_output_dir, 'model_f' + str(k) +'_'+ strategy+'.ckpt')):
-                checkpoint_path = os.path.join(this_output_dir, 'model_f' + str(k) +'_'+ strategy+'.ckpt')
-                if torch.cuda.is_available():
-                    state_dict = torch.load(checkpoint_path)
-                else:
-                    state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+            if strategy == 'domain-tuning':
+                if os.path.exists(os.path.join(this_output_dir, 'model_f' + str(k) +'_'+ 'self-supervised'+'.ckpt')):
+                    print('initializing model with pretrained weights')
+                    checkpoint_path = os.path.join(this_output_dir, 'model_f' + str(k) +'_'+ 'self-supervised'+'.ckpt')
+                    if torch.cuda.is_available():
+                        state_dict = torch.load(checkpoint_path)
+                    else:
+                        state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
 
             tuner = tune.Tuner(
                 tune.with_resources(
@@ -344,25 +346,25 @@ if __name__ == "__main__":
             start_timer()
 
             if strategy == 'self-supervised':
-                model_wrapper = RGBYieldRegressor(dataloaders=dataloaders_dict,
-                                                  device=device,
-                                                  lr=training_strategy_params[strategy]['lr'],
-                                                  momentum=momentum,
-                                                  wd=training_strategy_params[strategy]['wd'],
-                                                  # k=num_folds,
-                                                  pretrained=pretrained,
-                                                  tune_fc_only=training_strategy_params[strategy]['tune_fc_only'],
-                                                  model=architecture,
-                                                  training_response_standardizer=datamodule[strategy].training_response_standardizer,
-                                                  criterion=criterion[strategy],
-                                                  )
+                model_wrapper = RGBYieldRegressor_Trainer(dataloaders=dataloaders_dict,
+                                                          device=device,
+                                                          lr=training_strategy_params[strategy]['lr'],
+                                                          momentum=momentum,
+                                                          wd=training_strategy_params[strategy]['wd'],
+                                                          # k=num_folds,
+                                                          pretrained=pretrained,
+                                                          tune_fc_only=training_strategy_params[strategy]['tune_fc_only'],
+                                                          architecture=architecture,
+                                                          training_response_standardizer=datamodule[strategy].training_response_standardizer,
+                                                          criterion=criterion[strategy],
+                                                          )
                 if workers > 1:
                     model_wrapper.model = nn.DataParallel(model_wrapper.model)
                 model_wrapper.model.to(device)
 
             else:
                 # reintialize fc layer's weights
-                model_wrapper.reset_SSL_fc_weights()
+                model_wrapper.reinitialize_fc_layers()
                 # update dataloaders
                 model_wrapper.set_dataloaders(dataloaders=dataloaders_dict)
                 # update optimizer
@@ -392,11 +394,11 @@ if __name__ == "__main__":
                 model_wrapper.model.load_state_dict(state_dict)
             else:# Train and evaluate
                 print('training for {} epochs'.format(num_epochs))
-                model_wrapper.train_model(patience=patience,
-                                          min_delta=min_delta,
-                                          num_epochs=num_epochs,
-                                          min_epochs=min_epochs,
-                                          )
+                model_wrapper.train(patience=patience,
+                                    min_delta=min_delta,
+                                    num_epochs=num_epochs,
+                                    min_epochs=min_epochs,
+                                    )
                 run_time = end_timer_and_get_time('\nEnd training for fold {}'.format(k))
                 # save best model
                 torch.save(model_wrapper.model.state_dict(), os.path.join(this_output_dir, 'model_f' + str(k) +'_'+ strategy+'.ckpt'))

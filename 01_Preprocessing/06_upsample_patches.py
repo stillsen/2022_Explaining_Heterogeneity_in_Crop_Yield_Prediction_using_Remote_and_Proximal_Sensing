@@ -36,9 +36,10 @@ root = '/beegfs/stiller/PatchCROP_all/Data'
 for dir in os.listdir(root):
     # upsample resolution of each raster file contained in dir, to the appropriate resolution (s.o.)
     files = os.listdir(os.path.join(root, dir))
-    if 'Patch_ID_12' in dir:
+    if 'Patch_ID_95' in dir:
         for file in files:
-            # not an upsampled file ...
+            # if file == 'Tempelberg_soda3D_03072020_transparent_mosaic_group1_Patch_ID_73.tif' or file == 'Tempelberg_Soda_22062020_transparent_mosaic_group1_merged_aligned_Patch_ID_73.tif' or file == 'Tempelberg_sequ_11062020_index_ndvi_aligned_Patch_ID_73.tif' or file == 'pC_col_2020_plant_PS473_SOats_smc_Krig.tif':
+                # not an upsampled file ...
             if file.endswith('tif'):
                 # if flower strip patch
                 if any([fpids in file for fpids in flowerstrip_patch_ids]) or any([fpids in file for fpids in flowerstrip_patch_ids_other]):

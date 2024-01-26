@@ -58,11 +58,16 @@ class TuneYieldRegressor(tune.Trainable):
               device=None,
               training_response_standardizer=None,
               # workers:int=1,
-              state_dict=None):
+              state_dict=None,
+              SSL=None):
 
         print('tuning hyper parameters on patch {}'.format(patch_no))
+        # print('arch: {}'.format(architecture))
+        # print('SSL: {}'.format(SSL))
+        # print('state dict: {}'.format(state_dict is not None))
         # loop over folds, last fold is for testing only
 
+        self.epoch = 0
 
         if device == torch.device("cuda"):
             torch.cuda.empty_cache()
@@ -77,24 +82,32 @@ class TuneYieldRegressor(tune.Trainable):
                                           architecture=architecture,
                                           criterion=criterion,
                                           device=device,
-                                          workers=workers
+                                          workers=workers,
+                                          SSL=SSL
                                                )
 
         # update hyperparameters
         self.model_wrapper.set_hyper_parameters(lr=config['lr'], wd=config['wd'], batch_size=config['batch_size'])
         # build and update dataloaders
-        self.dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(),
-                            # 'test': datamodule.test_dataloader(),
-                            }
+        self.dataloaders_dict = {'train': datamodule.train_dataloader(), 'val': datamodule.val_dataloader(), }
         #set dataloaders
         self.model_wrapper.set_dataloaders(dataloaders=self.dataloaders_dict)
 
+        # print("Model SSL training: {}".format(self.model_wrapper.model.SSL_training))
+        # print(self.model_wrapper.model)
+
+        # pre-trained model incoming, i.e. domain-tuning
         if state_dict is not None:
+            if architecture == 'SimSiam' or architecture == 'VICRegL':
+                if SSL is None:
+                    self.model_wrapper.model.SSL_training = False
+                # self.model_wrapper.SSL = None
             self.model_wrapper.model.load_state_dict(state_dict)
             # reintialize fc layer's weights
             self.model_wrapper.reinitialize_fc_layers()
             # disable gradient computation for the first  layers
             self.model_wrapper.disable_all_but_fc_grads()
+            # print(self.model_wrapper.model)
 
         # update criterion
         self.model_wrapper.set_criterion(criterion=criterion)
@@ -105,7 +118,8 @@ class TuneYieldRegressor(tune.Trainable):
 
     def step(self):
         # train_loss = self.model_wrapper.tune_step()
-        train_loss = self.model_wrapper.train_step()
+        train_loss = self.model_wrapper.train_step(epoch=self.epoch)
+        self.epoch = self.epoch+1
         val_loss = self.model_wrapper.test(phase='val')
         return {"train_loss": train_loss, "val_loss": val_loss}
 
@@ -114,6 +128,5 @@ class TuneYieldRegressor(tune.Trainable):
         torch.save(self.model_wrapper.model.state_dict(), checkpoint_path)
         return checkpoint_path
 
-    def load_checkpoint(self, checkpoint_dir):
-        checkpoint_path = os.path.join(checkpoint_dir, "tuning_model.pth")
-        self.model_wrapper.model.load_state_dict(torch.load(checkpoint_path))
+    def load_checkpoint(self, checkpoint):
+        self.model_wrapper.model.load_state_dict(torch.load(checkpoint))

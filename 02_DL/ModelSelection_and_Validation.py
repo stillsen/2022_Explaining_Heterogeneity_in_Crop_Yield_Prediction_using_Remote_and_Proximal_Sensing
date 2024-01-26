@@ -16,10 +16,13 @@ from ray import tune
 from ray.tune.schedulers import HyperBandForBOHB
 from ray.tune.search.bohb import TuneBOHB
 
+from lightly.loss import NTXentLoss, VICRegLoss, NegativeCosineSimilarity, VICRegLLoss
+
 import torch.nn as nn
 # Own modules
 from TuneYieldRegressor import TuneYieldRegressor
 from RGBYieldRegressor_Trainer import RGBYieldRegressor_Trainer
+from RGBYieldRegressor_Trainer import SimCLR
 
 __author__ = 'Stefan Stiller'
 __copyright__ = 'Copyright 2022, Explaining_Heterogeneity_in_Crop_Yield_Prediction_using_Remote_and_Proximal_Sensing'
@@ -50,6 +53,9 @@ class ModelSelection_and_Validation:
                  device,
                  workers,
                  tune_epochs=100,
+                 SSL_transforms=None,
+                 add_n_black_noise_img_to_train=0,
+                 add_n_black_noise_img_to_val=0,
                  ):
 
         self.num_folds = num_folds
@@ -71,6 +77,9 @@ class ModelSelection_and_Validation:
         self.device = device
         self.workers = workers
         self.tune_epochs = tune_epochs
+        self.SSL_transforms = SSL_transforms
+        self.add_n_black_noise_img_to_train = add_n_black_noise_img_to_train
+        self.add_n_black_noise_img_to_val = add_n_black_noise_img_to_val
 
         # init with None
         self.lr = self.wd = self.batch_size = None
@@ -137,14 +146,42 @@ class ModelSelection_and_Validation:
                              criterion=None,
                              tune_name: str = None,
                              state_dict=None,
+                             SSL=False
                              ):
         # tune_name[strategy] = 'Tuning_{}_{}_all_bayes_L1_ALB_TL-FC_f{}_{}_{}'.format(self.architecture, validation_strategy, k, patch_no, strategy)
-
-        param_space = {
-            "lr": tune.loguniform(1e-6, 1e-1),
-            "wd": tune.uniform(0, 5 * 1e-3),
-            "batch_size": tune.choice([4, 8, 16, 32, 64, 128, 256, 512]),
-        }
+        if self.model_wrapper.architecture == 'resnet18':
+            param_space = {
+                "lr": tune.loguniform(1e-6, 1e-1),
+                "wd": tune.uniform(0, 5 * 1e-3),
+                "batch_size": tune.choice([4, 8, 16, 32, 64, 128, 256, 512]),
+            }
+        elif self.model_wrapper.architecture == 'SimCLR':
+            param_space = {
+                "lr": tune.loguniform(1e-6, 1e-1),
+                "wd": tune.uniform(0, 5 * 1e-3),
+                "batch_size": tune.choice([64, 128, 256, 512, 1024]),
+            }
+        elif self.model_wrapper.architecture == 'VICReg' or self.model_wrapper.architecture == 'VICRegL':
+            param_space = {
+                "lr": tune.loguniform(1e-6, 1e-1),
+                "wd": tune.uniform(0, 5 * 1e-3),
+                "batch_size": tune.choice([64, 128, 256, 512]),
+                # "batch_size": tune.choice([64, 128, ]),
+            }
+        elif  self.model_wrapper.architecture == 'VICRegLConvNext':
+            param_space = {
+                "lr": tune.loguniform(1e-6, 1e-1),
+                "wd": tune.uniform(0, 5 * 1e-3),
+                # "batch_size": tune.choice([32]),
+                "batch_size": tune.choice([32, 64, 128, ]),
+            }
+        elif self.model_wrapper.architecture == 'SimSiam':
+            param_space = {
+                "lr": tune.loguniform(1e-6, 1e-1),
+                "wd": tune.uniform(0, 5 * 1e-3),
+                "batch_size": tune.choice([64, 128, 256, 512]),
+                # "batch_size": tune.choice([64, 128]),
+            }
         bohb_hyperband = HyperBandForBOHB(
             time_attr="training_iteration",
             max_t=100,
@@ -157,40 +194,57 @@ class ModelSelection_and_Validation:
                                seed=seed, )
         bohb_search = tune.search.ConcurrencyLimiter(bohb_search, max_concurrent=4)
 
-        tuner = tune.Tuner(
-            tune.with_resources(
-                tune.with_parameters(
-                    TuneYieldRegressor,
-                    momentum=self.momentum,
-                    patch_no=patch_no,
-                    architecture=self.architecture,
-                    tune_fc_only=tune_fc_only,
-                    pretrained=self.pretrained,
-                    datamodule=datamodule,
-                    criterion=criterion,
-                    device=self.device,
-                    workers=self.workers,
-                    training_response_standardizer=datamodule.training_response_standardizer,
-                    state_dict=state_dict,
-                ),
-                {"gpu": self.workers}),
-            param_space=param_space,
-            tune_config=tune.TuneConfig(
-                metric='val_loss',
-                mode='min',
-                search_alg=bohb_search,
-                scheduler=bohb_hyperband,
-                num_samples=20,
-            ),
-            run_config=ray.air.config.RunConfig(
-                # checkpoint_config=ray.air.config.CheckpointConfig(checkpoint_freq=10,),
-                failure_config=ray.air.config.FailureConfig(max_failures=5),
-                stop={"training_iteration": self.tune_epochs},
-                name=tune_name,
-                local_dir=this_output_dir, )
-        )
+        #setup and init tmp dir
+        # tmp_log_dir = os.path.join(this_output_dir, 'tmp_ray_log') # -> error: AF_UNIX path length cannot exceed 107 bytes
+        tmp_log_dir = os.path.join('/beegfs/stiller/', 'tmp')
+        # tmp_log_dir = os.path.join('/home/stillsen/', 'tmp')
+        if not os.path.exists(tmp_log_dir):
+            os.mkdir(tmp_log_dir)
+        ray.init(_temp_dir=tmp_log_dir,
+                 ignore_reinit_error=True)
 
-        analysis = tuner.fit()
+        try:
+            tuner = tune.Tuner(
+                tune.with_resources(
+                    tune.with_parameters(
+                        TuneYieldRegressor,
+                        momentum=self.momentum,
+                        patch_no=patch_no,
+                        architecture=self.architecture,
+                        tune_fc_only=tune_fc_only,
+                        pretrained=self.pretrained,
+                        datamodule=datamodule,
+                        criterion=criterion,
+                        device=self.device,
+                        workers=self.workers,
+                        training_response_standardizer=datamodule.training_response_standardizer,
+                        state_dict=state_dict,
+                        SSL=SSL
+                    ),
+                    {"gpu": self.workers}),
+                    # {"cpu": self.workers}),
+                param_space=param_space,
+                tune_config=tune.TuneConfig(
+                    metric='val_loss',
+                    mode='min',
+                    search_alg=bohb_search,
+                    scheduler=bohb_hyperband,
+                    num_samples=50,
+                ),
+                run_config=ray.air.config.RunConfig(
+                    # checkpoint_config=ray.air.config.CheckpointConfig(checkpoint_freq=10,),
+                    failure_config=ray.air.config.FailureConfig(max_failures=5),
+                    stop={"training_iteration": self.tune_epochs},
+                    name=tune_name,
+                    local_dir=this_output_dir, )
+            )
+
+            analysis = tuner.fit()
+        except Exception as e:
+            print("Exception {}: ".format(e))
+        finally:
+            print('finished hyper-param tuning')
+            # ray.shutdown()
         # torch.save(analysis.get_dataframe(filter_metric="val_loss", filter_mode="min"), os.path.join(this_output_dir, 'analysis_f{}_{}.ray'.format(k, strategy)))
         best_result = analysis.get_best_result(metric="val_loss", mode="min")
         lr = best_result.config['lr']
@@ -231,6 +285,112 @@ class ModelSelection_and_Validation:
                                                           k=k,
                                                           state_dict=None)
 
+    def train_and_tune_lightlySSL(self, start=0, SSL_type = 'VICReg', domain_training_enabled:bool=False):
+        '''
+        Tune hyperparamters, pre-train and train models in a 4-fold cross validation approach using lightly SSL. Type of cross validation is to be specified in the datamodule.
+        :param start: beginning fold [0..3]
+        :return:
+        '''
+        training_strategy = ['self-supervised','domain-tuning']
+        training_strategy_params = {
+            training_strategy[0]: {
+                'tune_fc_only': False,
+                'augmentation': True,
+                'lr': None,
+                'wd': None,
+                'batch_size': None,
+            },
+            training_strategy[1]: {
+                'tune_fc_only': True,
+                'augmentation': True,
+                'lr': None,
+                'wd': None,
+                'batch_size': None,
+            }
+        }
+        tune_name = dict()
+        tune_name['self-supervised'] = ''
+        tune_name['domain-tuning'] = ''
+
+        if SSL_type == 'SimCLR':
+            criterion = {training_strategy[0]: NTXentLoss(),
+                         training_strategy[1]: nn.MSELoss(reduction='mean'),}
+        elif SSL_type == 'VICReg':
+            criterion = {training_strategy[0]: VICRegLoss(),
+                         training_strategy[1]: nn.MSELoss(reduction='mean'), }
+        elif SSL_type == 'SimSiam':
+            criterion = {training_strategy[0]: NegativeCosineSimilarity(),
+                         training_strategy[1]: nn.MSELoss(reduction='mean'), }
+        elif SSL_type == 'VICRegL' or SSL_type == 'VICRegLConvNext':
+            criterion = {training_strategy[0]: VICRegLLoss(),
+                         training_strategy[1]: nn.MSELoss(reduction='mean'), }
+
+        SSL = SSL_type
+        for k in range(start, self.num_folds):
+            print('#' * 60)
+            print('Fold: {}'.format(k))
+            # reinitialize hyperparams for this fold
+            self.lr = self.wd = self.batch_size = None
+
+            # initialize trainer and architecture
+
+            self.model_wrapper = RGBYieldRegressor_Trainer(
+                pretrained=self.pretrained,
+                tune_fc_only=training_strategy_params['self-supervised']['tune_fc_only'],
+                architecture=self.architecture,
+                criterion=criterion['self-supervised'],
+                device=self.device,
+                workers=self.workers,
+                SSL=SSL
+            )
+            selected_training_strategies = training_strategy if domain_training_enabled else training_strategy[:-1]
+            for strategy in selected_training_strategies:
+                print('#' * 60)
+                print('Fold: {}, Strategy: {}'.format(k, strategy))
+
+                if strategy == 'domain-tuning':
+                    # self.model_wrapper.architecture = 'resnet18'
+                    # self.architecture = 'resnet18'
+                    self.model_wrapper.set_criterion(criterion=criterion['domain-tuning'])
+                    SSL_transforms = None
+                    self.datamodule.augmented = True
+                    SSL = None
+                elif strategy == 'self-supervised':
+                    # self.model_wrapper.architecture = 'SimCLR'
+                    # self.architecture = 'SimCLR'
+                    self.model_wrapper.set_criterion(criterion=criterion['self-supervised'])
+                    SSL_transforms = self.SSL_transforms
+                    SSL = SSL_type
+                print('setting SSL from {} to {}'.format(str(self.model_wrapper.SSL), str(SSL)))
+                self.model_wrapper.SSL = SSL
+                # load weights and skip rest of the method if already trained
+                if self.model_wrapper.load_model_if_exists(model_dir=self.this_output_dir, strategy=strategy, k=k):
+                    continue
+
+                # load pretrained model weights for hyper parameter tuning
+                if strategy == 'domain-tuning':
+                    # get and initialize model with pre-trained, self-supervised weights
+                    state_dict = self.get_state_dict_if_exists(this_output_dir=self.this_output_dir, k=k, strategy='self-supervised')
+                    self.model_wrapper.model.load_state_dict(state_dict)
+
+                    if SSL_type == 'SimSiam' or SSL_type == 'VICRegL' or SSL_type == 'VICRegLConvNext':
+                        self.model_wrapper.model.SSL_training = False
+                    # freeze conv layers and reinitialize FC layer
+                    self.model_wrapper.reinitialize_fc_layers()
+                    self.model_wrapper.disable_all_but_fc_grads()
+                    # change architecture difference in label for training
+                else:
+                    state_dict = None
+                    if SSL_type == 'SimSiam' or SSL_type == 'VICRegL' or SSL_type == 'VICRegLConvNext':
+                        self.model_wrapper.model.SSL_training = True
+
+                self._train_and_tune_OneFold_OneStrategyModel(tune_fc_only=training_strategy_params[strategy]['tune_fc_only'],
+                                                              criterion=criterion[strategy],
+                                                              k=k,
+                                                              state_dict=state_dict,
+                                                              strategy=strategy,
+                                                              SSL_transforms=SSL_transforms,
+                                                              SSL=SSL)
     def train_and_tune_SSL(self, start:int=0):
         '''
         Tune hyperparamters and rain a self-supervised models in a 4-fold cross validation approach, i.e. first pre-training is performed on the input data to predict the average mean pixel value
@@ -317,16 +477,23 @@ class ModelSelection_and_Validation:
 
 
 
-    def _train_and_tune_OneFold_OneStrategyModel(self, tune_fc_only, criterion, k, state_dict=None, strategy: str = ''):
+    def _train_and_tune_OneFold_OneStrategyModel(self, tune_fc_only, criterion, k, state_dict=None, strategy: str = '', SSL_transforms=None, SSL= None):
 
         if strategy != '':
             strategy = '_' + strategy
 
         # sample data into folds according to provided in validation strategy
-        self.datamodule.setup_fold(fold=k, training_response_standardization=self.training_response_normalization)
+        self.datamodule.setup_fold(
+                                    fold=k,
+                                    training_response_standardization=self.training_response_normalization,
+                                    trainset_transforms=SSL_transforms,
+                                    add_n_black_noise_img_to_train=self.add_n_black_noise_img_to_train,
+                                    add_n_black_noise_img_to_val=self.add_n_black_noise_img_to_val,
+        )
 
         # tune hyper parameters #######################
-        tune_name = 'Tuning_{}_{}_all_bayes_L1_ALB_f{}{}_{}'.format(self.architecture, self.validation_strategy, k, strategy, self.patch_no)
+        # tune_name = 'Tuning_{}_{}_all_bayes_L1_ALB_f{}{}_{}'.format(self.architecture, self.validation_strategy, k, strategy, self.patch_no)
+        tune_name = 'Tuning_{}_{}_f{}{}_{}'.format(self.architecture, self.validation_strategy, k, strategy, self.patch_no)
 
         # load hyper params if already tuned
         if not self.load_hyperparameters_if_exist(k=k, strategy=strategy):
@@ -338,9 +505,10 @@ class ModelSelection_and_Validation:
                                                                     criterion=criterion,
                                                                     tune_name=tune_name,
                                                                     state_dict=state_dict,
+                                                                    SSL=SSL
                                                                     )
             self.save_hyperparameters(k=k, strategy=strategy)
-
+        # self.lr, self.wd, self.batch_size = 0.01, 0.01, 32
         if not self.only_tune_hyperparameters:
             ###################### Training #########################
             # set hyper parameters for model wrapper and data module
@@ -384,4 +552,8 @@ class ModelSelection_and_Validation:
                                })
             df.to_csv(os.path.join(self.this_output_dir, 'training_statistics_f' + str(k) + strategy + '.csv'), encoding='utf-8')
 
+            # save learning rates
+            df = pd.DataFrame({'lrs': self.model_wrapper.lrs,
+                               })
+            df.to_csv(os.path.join(self.this_output_dir, 'lrs_f' + str(k) + strategy + '.csv'), encoding='utf-8')
 

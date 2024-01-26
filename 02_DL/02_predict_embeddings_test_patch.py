@@ -56,8 +56,8 @@ momentum = 0.9 # (Krizhevsky et al.2012)
 wd = 0.0005 # (Krizhevsky et al.2012)
 classes = 1
 # batch_size = 16
-batch_size = 1  # (Krizhevsky et al.2012)
-num_folds = 4#9 # ranom-CV -> 1
+batch_size = 1
+num_folds = 4
 min_delta = 0.001
 patience = 10
 min_epochs = num_epochs
@@ -80,7 +80,6 @@ test_patch_no = 90
 # stride = 112
 stride = 30
 kernel_size = 224
-
 # architecture = 'baselinemodel'
 # architecture = 'densenet'
 # architecture = 'short_densenet'
@@ -108,8 +107,8 @@ criterion = nn.MSELoss(reduction='mean')
 # scv = False
 
 fake_labels = False
-# training_response_normalization = True
 training_response_normalization = False
+criterion = nn.MSELoss(reduction='mean')
 
 # Detect if we have a GPU available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -120,19 +119,14 @@ else:
     workers = 1#torch.cuda.device_count()
     print('\twith {} workers'.format(workers))
 
-# model_name = output_dirs[patch_no].split('/')[-1]
-
-# this_output_dir = output_dirs[patch_no] + '_SimCLR_SCV_no_test_E1000lightly-SimCLR'
-# this_output_dir = output_dirs[patch_no] + '_' + architecture + '_SCV_no_test' + '_E' + str(num_epochs) + '_kern_size'+ str(kernel_size)
 # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICReg_kernel_size_' + str(kernel_size)
+# this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + validation_strategy + '_E' + str(num_epochs) + 'lightly-VICRegLConvNext_kernel_size_' + str(kernel_size)
 # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + 'SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICRegLConvNext_kernel_size_' + str(kernel_size)
 # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + 'SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICReg_kernel_size_' + str(kernel_size)+'-black-added-to-train-and-val'
 # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + 'SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICReg_kernel_size_' + str(kernel_size)+'-black-added-to-train'
 
 this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + 'SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICReg_kernel_size_' + str(kernel_size) + '_recompute'
 # this_output_dir = output_dirs[patch_no] + '_' + architecture + '_' + 'SCV_no_test' + '_E' + str(num_epochs) + 'lightly-VICRegLConvNext_kernel_size_' + str(kernel_size)+'_recompute'
-
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -153,23 +147,22 @@ datamodule = PatchCROPDataModule(
                                  validation_strategy=validation_strategy,
                                  fake_labels=fake_labels,
                                  )
-print('Datamodule set up.')
 datamodule.prepare_data(num_samples=num_samples_per_fold)
-print('preparing data in data module.')
 checkpoint_paths = ['model_f0.ckpt',
                     'model_f1.ckpt',
                     'model_f2.ckpt',
                     'model_f3.ckpt',
                     ]
 SSL = False
-if 'SSL' in this_output_dir or 'SimCLR' in this_output_dir or 'VICReg' in this_output_dir or 'SimSiam' in this_output_dir  or 'VICRegL' in this_output_dir or 'VICRegLConvNext' in this_output_dir:
-    checkpoint_paths = ['model_f0_domain-tuning.ckpt',
-                        'model_f1_domain-tuning.ckpt',
-                        'model_f2_domain-tuning.ckpt',
-                        'model_f3_domain-tuning.ckpt',
+if 'SSL' in this_output_dir or 'SimCLR' in this_output_dir or 'VICReg' in this_output_dir or 'SimSiam' in this_output_dir or 'VICRegL' in this_output_dir or 'VICRegLConvNext' in this_output_dir:
+    checkpoint_paths = ['model_f0_self-supervised.ckpt',
+                        'model_f1_self-supervised.ckpt',
+                        'model_f2_self-supervised.ckpt',
+                        'model_f3_self-supervised.ckpt',
                         ]
     SSL = True
-    strategy = 'domain-tuning'
+    strategy = 'self-supervised'
+
 checkpoint_paths = [this_output_dir+'/'+cp for cp in checkpoint_paths]
 
 sets = [
@@ -192,12 +185,12 @@ for s in sets:
     local_r[s] = []
 
     for k in range(num_folds):
-        print('fold {}'.format(k))
-        print('setting up dataloaders')
+        print('predictions for fold {}'.format(k))
         # load data
         dataloaders_dict = {
-            'test': datamodule.all_dataloader(),
+            'test': datamodule.all_dataloader(shuffle=False),
                             }
+
         # set up model wrapper and input data
         model_wrapper = RGBYieldRegressor_Trainer(
             pretrained=pretrained,
@@ -212,13 +205,14 @@ for s in sets:
         # reinitialize FC layer for domain prediction, if SSL
         if SSL:
             if architecture == 'SimSiam' or architecture == 'VICRegL' or architecture == 'VICRegLConvNext':
-                model_wrapper.model.SSL_training = False
-            model_wrapper.reinitialize_fc_layers()
+                model_wrapper.model.SSL_training = True
+            # model_wrapper.reinitialize_fc_layers()
+
         # load weights and skip rest of the method if already trained
         model_loaded = model_wrapper.load_model_if_exists(model_dir=this_output_dir, strategy=strategy, k=k)
         if not model_loaded: raise FileNotFoundError
 
-        # load trained model weights with respect to possible parallelization and device
+        # # load trained model weights with respect to possible parallelization and device
         # if torch.cuda.is_available():
         #     state_dict = torch.load(checkpoint_paths[k])
         # else:
@@ -237,14 +231,23 @@ for s in sets:
 
         # make prediction
         # for each fold store labels and predictions
-        local_preds, local_labels = model_wrapper.predict(phase=s)
+        local_preds, local_labels = model_wrapper.predict(phase=s, predict_embeddings=True)
+
+        # print(model_wrapper.model)
+        #
+        # print('0 local_preds: {}'.format(local_preds[0]))
+        # print('0 local_labels: {}'.format(local_labels[0]))
+        #
+        # print('len local_preds: {}'.format(len(local_preds)))
+        # print('len local_labels: {}'.format(len(local_labels)))
+        #
+        # print('local_preds: {}'.format(local_preds.size()))
+        # print('local_labels: {}'.format(local_labels.size()))
 
         # save labels and predictions for each fold
-        torch.save(local_preds, os.path.join(this_output_dir, 'y_hat_' + file_suffix + s + '_' + str(k) + '.pt'))
-        torch.save(local_labels, os.path.join(this_output_dir, 'y_' + file_suffix + s + '_' + str(k) + '.pt'))
+        torch.save(local_preds, os.path.join(this_output_dir, 'y_hat_SSL_' + file_suffix + s + '_' + str(k) + '.pt'))
+        torch.save(local_labels, os.path.join(this_output_dir, 'y_SSL_' + file_suffix + s + '_' + str(k) + '.pt'))
 
-        # for debugging, save labels and predictions in df
-        y_yhat_df = pd.DataFrame({'y': local_labels, 'y_hat': local_preds})
-        y_yhat_df.to_csv(os.path.join(this_output_dir, 'y-y_hat_{}{}_{}.csv'.format(file_suffix, s, k)), encoding='utf-8')
-
-
+        # # for debugging, save labels and predictions in df
+        # y_yhat_df = pd.DataFrame({'y': local_labels, 'y_hat': local_preds})
+        # y_yhat_df.to_csv(os.path.join(this_output_dir, 'y-y_hat_{}_{}.csv'.format(s, k)), encoding='utf-8')
